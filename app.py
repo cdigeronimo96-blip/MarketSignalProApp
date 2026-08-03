@@ -5977,7 +5977,7 @@ def _render_bottom_nav(active=""):
     # Use a unique URL param to navigate via the bottom bar
     nav_items = [
         ("home", "🏠", "Market", "dashboard"),
-        ("perf", "📊", "Performance", "performance"),
+        ("perf", "📊", "Results", "performance"),
         ("disc", "🔍", "Discover", "discover"),
         ("watch", "⭐", "Watchlist", "watchlist"),
         ("more", "⚙️", "Settings", "settings"),
@@ -6342,7 +6342,11 @@ def render_topbar(active=None):
         # plus the logo and account menu, and the longest label was squeezing every other
         # pill. The page still titles itself "Market Overview" in its own header, and the
         # bottom (PWA) nav already used "Market", so this is also the consistent name.
-        pages = [("Market","dashboard"), ("Performance","performance"),
+        # Each label says what the page IS, and the pair reads as a sentence: Discover is
+        # what the engine is calling right now, Results is how those calls worked out.
+        # "Performance" was ambiguous — performance of the market, or of the model? — and
+        # "Track Record" was already taken by the deep-dive page in the sidebar.
+        pages = [("Market","dashboard"), ("Results","performance"),
                  ("Discover","discover"), (_sig_lbl,"signals")]
         if is_premium():   # Refine (signal filtering) is premium-only — hide it from the free-user nav
             pages.append(("Refine","screener"))
@@ -6552,10 +6556,13 @@ def render_sidebar():
                 if st.button(cat,key=f"sb_s_{cat[:20].replace(' ','_')}",use_container_width=True):
                     st.session_state.discover_cat=cat; nav("discover")
             st.markdown('<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.2);letter-spacing:1.5px;text-transform:uppercase;padding:12px 18px 5px;">Tools</div>',unsafe_allow_html=True)
-            _tools = [("📊","Market Home","dashboard"),("⭐","Watchlist","watchlist")]
+            _tools = [("📊","Market Overview","dashboard"),("📈","Results","performance"),("⭐","Watchlist","watchlist")]
             if is_premium():   # Scanner is premium-only — hide from free-user nav
                 _tools.append(("🔍","Refine scanner","screener"))
-            _tools += [("📉","Signal Track Record","signal_track"),("💰","Pricing","pricing"),("🔔","Alerts & Settings","settings"),("💬","Contact & Help","contact")]
+            # "Full Track Record", not "Signal Track Record": this is the per-horizon audit
+            # (1/3/5/10/30-day vs the S&P) that the Results page summarises. Naming it as the
+            # deep version of Results says which to open; two "track record" pages did not.
+            _tools += [("📉","Full Track Record","signal_track"),("💰","Pricing","pricing"),("🔔","Alerts & Settings","settings"),("💬","Contact & Help","contact")]
             for icon,label,pg in _tools:
                 if st.button(f"{icon} {label}",key=f"sb_{pg}",use_container_width=True): nav(pg)
             if is_admin():
@@ -6679,11 +6686,11 @@ def render_signal_proof(context="overview"):
     the aggregate isn't favorable (SIGNAL_PROOF_MIN_AVG) — we never advertise a losing number.
 
     Returns True when the band actually rendered. Callers that lead with this band (the
-    Performance page, whose whole premise IS the track record) check the return and render
+    Results page, whose whole premise IS the track record) check the return and render
     their own honest empty state instead of silently showing nothing.
 
     The favourability filter is for the MARKETING surfaces only (landing, Market Overview).
-    The Performance page is the model's own accountability page — it states outright that
+    The Results page is the model's own accountability page — it states outright that
     nothing is curated — so it shows the real aggregate whatever it is, and hides only when
     there genuinely isn't a measured record yet."""
     s = _signal_track_summary()
@@ -6697,7 +6704,7 @@ def render_signal_proof(context="overview"):
     _ac = GREEN if avg >= 0 else RED
     _wc = GREEN if wr >= 50 else GOLD
     st.markdown(f'''<div style="background:linear-gradient(135deg,{GOLD}12,transparent);border:1px solid {GOLD}33;border-radius:14px;padding:16px 20px;margin:8px 0 6px;">
-        <div style="font-size:10px;font-weight:800;color:{GOLD};letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;">📈 Signal Track Record · to date</div>
+        <div style="font-size:10px;font-weight:800;color:{GOLD};letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;">📈 Track Record · to date</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:14px;">
             <div><div style="font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:900;color:#e2e8f0;">{n:,}</div><div style="font-size:11px;color:#4a5e7a;margin-top:2px;">Signals tracked</div></div>
             <div><div style="font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:900;color:{_wc};">{wr}%</div><div style="font-size:11px;color:#4a5e7a;margin-top:2px;">Correct direction</div></div>
@@ -7879,7 +7886,7 @@ def page_dashboard():
     # ── Market Overview ONLY ──
     # NOTE: This page is intentionally about the OVERALL MARKET — indexes, breadth,
     # sectors, movers, buzz. Everything about the MODEL (Top Signals teaser, the
-    # track-record proof band, category performance) lives on the Performance page;
+    # track-record proof band, category win rates) lives on the Results page;
     # signal browsing lives in Discover. No model content belongs here.
     st.markdown(f'<div style="font-size:11px;font-weight:700;color:#4a5e7a;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;">📊 MARKET OVERVIEW</div>',unsafe_allow_html=True)
 
@@ -8129,14 +8136,14 @@ def page_dashboard():
     st.markdown('</div>',unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
-# PAGE: MODEL PERFORMANCE
+# PAGE: RESULTS  (route key stays "performance" — renaming it would break bookmarks)
 # ─────────────────────────────────────────────────────────────
 def page_performance():
-    """The MODEL's showcase page — everything about how Scanviction itself is doing,
-    pulled off the Market Overview (proof band, Top Signals teaser) and blended with
-    the Brief's what's-new stream: live track record, today's top performers since
-    their signals, win-rate by category (animated bars), and the model's latest
-    activity feed. The Market Overview page stays purely about the market."""
+    """RESULTS — how the engine's calls actually worked out. The counterpart to Discover:
+    Discover is what Scanviction is flagging right now, this is how earlier flags did.
+    Headline win rate, best performers since their signal, win rate by category and the
+    latest activity. The deeper per-horizon audit (1/3/5/10/30-day vs the S&P) lives on
+    the separate Full Track Record page. Market Overview stays purely about the market."""
     render_topbar("performance")
     st.markdown('<div class="page-wrap pw-narrow">', unsafe_allow_html=True)
 
@@ -8184,10 +8191,12 @@ def page_performance():
 
     st.markdown('<div class="pf-hd">'
                 '<div class="pf-live"><span class="pf-dot"></span>Live · updates with every scan</div>'
-                '<div class="pf-title">Model Performance</div>'
-                '<div class="pf-sub">How the Scanviction engine is actually doing — every signal is logged with a locked '
-                'entry price and timestamp the moment it fires, then measured in its called direction. '
-                'Educational only — not financial advice.</div></div>', unsafe_allow_html=True)
+                '<div class="pf-title">Results</div>'
+                '<div class="pf-sub">How the engine\'s calls actually worked out. Every signal is logged with a locked '
+                'entry price and timestamp the moment it fires, then measured in its called direction — so these are '
+                'outcomes, not estimates. For what\'s being flagged <b style="color:#a5b4fc;">right now</b>, see '
+                '<b style="color:#a5b4fc;">Discover</b>. Educational only — not financial advice.</div></div>',
+                unsafe_allow_html=True)
 
     # ── 1) Live track record (the proof band that used to sit on Market Overview) ──
     # This page LEADS with the band, so it can't silently render nothing: the band hides
@@ -8198,7 +8207,7 @@ def page_performance():
             '<div style="background:linear-gradient(135deg,rgba(245,158,11,0.07),transparent);'
             'border:1px solid rgba(245,158,11,0.22);border-radius:14px;padding:22px 20px;margin:8px 0 6px;">'
             '<div style="font-size:10px;font-weight:800;color:#f59e0b;letter-spacing:2px;'
-            'text-transform:uppercase;margin-bottom:10px;">📈 Signal Track Record · building</div>'
+            'text-transform:uppercase;margin-bottom:10px;">📈 Track Record · building</div>'
             '<div style="font-size:13px;color:#6b7fa0;line-height:1.6;">The engine is logging signals with '
             'locked entry prices right now, but none have completed a measurement horizon yet — outcomes '
             'resolve over 1–20 trading days, and we publish the aggregate only once at least three signals '
@@ -8213,10 +8222,10 @@ def page_performance():
     # conviction and backfilling "anything not underwater" is what let a signal from two
     # minutes ago — which by definition has accumulated nothing — head the list.
     st.markdown('<div class="pf-lbl">🏆 Top Performers · since signal</div>', unsafe_allow_html=True)
-    st.markdown('<div class="pf-note">The model\'s best picks by how far they\'ve moved <b style="color:#a5b4fc;">since '
+    st.markdown('<div class="pf-note">The best picks by how far they\'ve moved <b style="color:#a5b4fc;">since '
                 'the signal fired</b> — days or weeks ago, not just today. Longs measured up, shorts labeled SHORT and '
-                'measured as shorts (a decline = a win). For what\'s moving in today\'s session, see '
-                '<b style="color:#a5b4fc;">Discover</b>. Tap any card for the full breakdown.</div>',
+                'measured as shorts (a decline = a win). For what\'s being flagged in today\'s session, see '
+                '<b style="color:#a5b4fc;">Today\'s Signals</b> on Discover. Tap any card for the full breakdown.</div>',
                 unsafe_allow_html=True)
     try:
         _pgrouped = _discover_grouped()
@@ -8237,7 +8246,7 @@ def page_performance():
                     unsafe_allow_html=True)
 
     # ── 3) Performance by category — animated win-rate bars from REAL outcomes ──
-    st.markdown('<div class="pf-lbl">📊 Performance by Category</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pf-lbl">📊 Win Rate by Category</div>', unsafe_allow_html=True)
     st.markdown('<div class="pf-note">Win rate per signal category across all matured, tracked signals '
                 '(demo data excluded). Bars fill as real outcomes accumulate at the 1–20 day horizons.</div>',
                 unsafe_allow_html=True)
@@ -9041,12 +9050,12 @@ def _discover_body():
     # TODAY's board means TODAY. This used to rank by conviction and backfill with anything
     # "not underwater", so it filled with picks that fired one and two weeks ago — correct
     # for a track record, wrong under a heading that says today. Cumulative since-signal
-    # performance now lives on the Performance page; this board is strictly what's moving
+    # performance now lives on the Results page; this board is strictly what's moving
     # in the current session, measured in each signal's own direction.
-    st.markdown('<div class="disc-section-label">Today\'s Board · Moving Now</div>', unsafe_allow_html=True)
-    st.markdown('<div class="disc-sub">The signals with the biggest move <b style="color:#a5b4fc;">in today\'s session</b>, '
-                'measured in each signal\'s own direction — a short counts a decline as a gain. For how picks have done '
-                '<b style="color:#a5b4fc;">since they fired</b>, see <b style="color:#a5b4fc;">Performance</b>. '
+    st.markdown('<div class="disc-section-label">Today\'s Signals</div>', unsafe_allow_html=True)
+    st.markdown('<div class="disc-sub">What the engine is flagging <b style="color:#a5b4fc;">right now</b>, ranked by '
+                'today\'s move and measured in each signal\'s own direction — a short counts a decline as a gain. For how '
+                'earlier calls actually worked out, see <b style="color:#a5b4fc;">Results</b>. '
                 'Tap any card for the full breakdown.</div>', unsafe_allow_html=True)
     # Sample every category before ranking, so one high-edge category can't fill the board.
     pool = _signal_candidates(grouped)
@@ -10239,9 +10248,10 @@ def page_signal_track():
     st.markdown("""
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
         <div>
-            <div style="font-size:24px;font-weight:800;color:#e2e8f0;margin-bottom:6px;">\U0001F4C9 Signal Track Record</div>
-            <div style="font-size:13px;color:#374f6e;">Every recommendation Scanviction surfaces is logged with its entry price and timestamp,
-            then scored at 1 / 3 / 5 / 10 / 30-day horizons against a +/-3% threshold and vs the S&P 500.</div>
+            <div style="font-size:24px;font-weight:800;color:#e2e8f0;margin-bottom:6px;">\U0001F4C9 Full Track Record</div>
+            <div style="font-size:13px;color:#374f6e;">The complete audit behind <b style="color:#a5b4fc;">Results</b>: every recommendation
+            Scanviction surfaces is logged with its entry price and timestamp, then scored at 1 / 3 / 5 / 10 / 30-day horizons
+            against a +/-3% threshold and vs the S&P 500.</div>
         </div>
         <span style="background:rgba(168,85,247,0.15);color:#c084fc;border:1px solid rgba(168,85,247,0.35);
               font-size:11px;font-weight:700;padding:6px 14px;border-radius:20px;margin-top:4px;">
