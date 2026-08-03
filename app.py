@@ -1133,7 +1133,7 @@ def handle_payment_return():
             return True
         valid_pages = {"landing","features","login","signup","verify_email","forgot_pw","pricing",
                        "contact","dashboard","discover","watchlist","screener","bi_dashboard",
-                       "stock_detail","settings","admin","signal_track"}
+                       "stock_detail","settings","admin","signal_track","performance","signals"}
         if target in valid_pages:
             nav(target)
             return True
@@ -2367,7 +2367,7 @@ PAGE_ACCESS = {
     # auth-only
     "dashboard": "auth", "discover": "auth", "watchlist": "auth",
     "settings": "auth", "signal_track": "auth", "signals": "auth",
-    "stock_detail": "auth",
+    "stock_detail": "auth", "performance": "auth",
     # premium
     "screener": "premium", "bi_dashboard": "premium",
     # admin
@@ -2547,7 +2547,8 @@ def _restore_page_from_url():
 
     valid = {"landing","features","login","signup","verify_email","forgot_pw","pricing",
              "contact","dashboard","discover","watchlist","screener","bi_dashboard",
-             "stock_detail","settings","admin","signal_track","terms","privacy"}
+             "stock_detail","settings","admin","signal_track","terms","privacy",
+             "performance","signals"}
 
     # ── Password reset deep-link: route to forgot_pw so the reset form shows ──
     # The reset email link is `/?reset_token=<tok>&email=<addr>` with no &page=,
@@ -5892,7 +5893,7 @@ def render_lock(name=""):
                     border:1px solid rgba(245,158,11,0.3);margin-bottom:14px;">PREMIUM FEATURE</div>
         <div style="font-size:13px;color:#374f6e;margin-bottom:6px;line-height:1.7;">
             Upgrade to Premium to unlock all 23 composite signal categories (incl. bear/short),<br>
-            plus the Market Scanner, signal charts, the short-squeeze scanner, and unlimited alerts.
+            plus the Refine scanner, signal charts, the short-squeeze scanner, and unlimited alerts.
         </div>
         <div style="font-size:12px;color:#2a3a52;margin-bottom:20px;">Founding price: $19/month · Cancel anytime · No contracts</div>
     </div>""", unsafe_allow_html=True)
@@ -5957,10 +5958,10 @@ def _render_bottom_nav(active=""):
     """Native-style bottom tab bar — appears only when app is launched in PWA standalone mode (installed)."""
     # Use a unique URL param to navigate via the bottom bar
     nav_items = [
-        ("home", "🏠", "Home", "dashboard"),
+        ("home", "🏠", "Market", "dashboard"),
+        ("perf", "📊", "Performance", "performance"),
         ("disc", "🔍", "Discover", "discover"),
         ("watch", "⭐", "Watchlist", "watchlist"),
-        ("signals", "📊", "Signals", "signal_track"),
         ("more", "⚙️", "Settings", "settings"),
     ]
 
@@ -6053,7 +6054,7 @@ def _render_bottom_nav(active=""):
         if "bottom_nav" in params:
             target = params.get("bottom_nav", "")
             st.query_params.clear()
-            if target in {"dashboard","discover","watchlist","signal_track","settings","screener","bi_dashboard"}:
+            if target in {"dashboard","discover","watchlist","signal_track","performance","settings","screener","bi_dashboard"}:
                 nav(target)
     except Exception:
         pass
@@ -6104,6 +6105,18 @@ def render_topbar(active=None):
     transition:all 0.16s cubic-bezier(.4,0,.2,1) !important;
 }}
 [class*="st-key-navtb_"] button > * {{ position:relative !important; z-index:1 !important; }}
+/* Dead-center the label: the button's inner markdown <p> carries its own margins/
+   line-height, which floated the text high/low inside the 38px pill (visibly
+   misaligned between tabs). Flex-center the button and zero the label's box. */
+[class*="st-key-navtb_"] button {{
+    display:inline-flex !important; align-items:center !important; justify-content:center !important;
+}}
+[class*="st-key-navtb_"] button [data-testid="stMarkdownContainer"],
+[class*="st-key-navtb_"] button [data-testid="stMarkdownContainer"] p {{
+    margin:0 !important; padding:0 !important; line-height:1.2 !important;
+    display:flex !important; align-items:center !important; justify-content:center !important;
+    overflow:hidden !important; text-overflow:ellipsis !important;
+}}
 /* The Brief pill carries a live count ("🔔 Brief (12)") — tighter padding so the
    number never clips inside the fixed-height pill. */
 [class*="st-key-navtb_signals"] button {{ padding:0 8px !important; }}
@@ -6296,20 +6309,26 @@ def render_topbar(active=None):
         except Exception:
             pass
         _sig_lbl = "🔔 Brief" + (f" ({_unseen})" if _unseen else "")
-        pages = [("Home","dashboard"),("Discover","discover"),("Watch","watchlist"),
-                 (_sig_lbl,"signals")]
-        if is_premium():   # Market Scanner is premium-only — hide it from the free-user nav
-            pages.append(("Scanner","screener"))
-        pages += [("Pricing","pricing"),("Contact","contact")]
+        # Nav order tells the product story: the overall MARKET first, how the MODEL
+        # is performing, then the signal surfaces (Discover → Brief → Refine), then
+        # the personal/utility tabs. "Refine" = the old Refine scanner (it filters
+        # the CURRENT signals by parameters — "Scanner" wrongly implied a new scan).
+        pages = [("Market Overview","dashboard"), ("Performance","performance"),
+                 ("Discover","discover"), (_sig_lbl,"signals")]
+        if is_premium():   # Refine (signal filtering) is premium-only — hide it from the free-user nav
+            pages.append(("Refine","screener"))
+        pages += [("Watchlist","watchlist"),("Pricing","pricing"),("Contact","contact")]
         if is_admin(): pages.append(("Admin","admin"))
 
         ri = {"owner":"👑","admin":"🛡️","premium":"⭐","free":"👤"}.get(st.session_state.role,"👤")
         first = (st.session_state.user.get("name","") or "").split()[0]
 
-        # Equal pills, EXCEPT the Brief tab gets extra width when it carries an unseen
-        # count — otherwise "🔔 Brief (12)" overflowed its fixed-width pill and the
-        # number rendered clipped/cut off (overflow:hidden on the pill).
-        nav_ratios = [1.0] * len(pages)
+        # Pill widths follow their label length (equal pills clipped "Market
+        # Overview" and squeezed short labels with dead space). The Brief tab gets
+        # extra width when it carries an unseen count — otherwise "🔔 Brief (12)"
+        # overflowed its fixed-width pill and rendered clipped.
+        _W = {"dashboard": 1.55, "performance": 1.3, "watchlist": 1.2}
+        nav_ratios = [_W.get(_pg, 1.0) for (_, _pg) in pages]
         if _unseen:
             for _pi, (_, _pg) in enumerate(pages):
                 if _pg == "signals":
@@ -6508,7 +6527,7 @@ def render_sidebar():
             st.markdown('<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.2);letter-spacing:1.5px;text-transform:uppercase;padding:12px 18px 5px;">Tools</div>',unsafe_allow_html=True)
             _tools = [("📊","Market Home","dashboard"),("⭐","Watchlist","watchlist")]
             if is_premium():   # Scanner is premium-only — hide from free-user nav
-                _tools.append(("🔍","Market Scanner","screener"))
+                _tools.append(("🔍","Refine scanner","screener"))
             _tools += [("📉","Signal Track Record","signal_track"),("💰","Pricing","pricing"),("🔔","Alerts & Settings","settings"),("💬","Contact & Help","contact")]
             for icon,label,pg in _tools:
                 if st.button(f"{icon} {label}",key=f"sb_{pg}",use_container_width=True): nav(pg)
@@ -6630,10 +6649,21 @@ def _signal_track_summary():
 def render_signal_proof(context="overview"):
     """Live 'track record' proof strip (tracked · win rate · avg move since signal · best).
     Social proof for the landing page + Market Overview. Hidden when there's too little data OR
-    the aggregate isn't favorable (SIGNAL_PROOF_MIN_AVG) — we never advertise a losing number."""
+    the aggregate isn't favorable (SIGNAL_PROOF_MIN_AVG) — we never advertise a losing number.
+
+    Returns True when the band actually rendered. Callers that lead with this band (the
+    Performance page, whose whole premise IS the track record) check the return and render
+    their own honest empty state instead of silently showing nothing.
+
+    The favourability filter is for the MARKETING surfaces only (landing, Market Overview).
+    The Performance page is the model's own accountability page — it states outright that
+    nothing is curated — so it shows the real aggregate whatever it is, and hides only when
+    there genuinely isn't a measured record yet."""
     s = _signal_track_summary()
-    if not s or s["avg"] < SIGNAL_PROOF_MIN_AVG:
-        return
+    if not s:
+        return False
+    if context != "performance" and s["avg"] < SIGNAL_PROOF_MIN_AVG:
+        return False
     avg = s["avg"]; wr = s["win_rate"]; n = s["count"]; best = s["best"]
     avg_s = f"+{avg:.1f}%" if avg >= 0 else f"{avg:.1f}%"
     best_s = f"+{best:.1f}%" if best >= 0 else f"{best:.1f}%"
@@ -6649,6 +6679,7 @@ def render_signal_proof(context="overview"):
         </div>
         <div style="font-size:10px;color:#2a3a52;margin-top:10px;">Equal-weight average of each tracked signal's measured move in its called direction (a short counts a decline as a gain). Educational only · not financial advice · past performance ≠ future results.</div>
     </div>''', unsafe_allow_html=True)
+    return True
 
 HERO_MIN_PRICE = float(os.environ.get("HERO_MIN_PRICE", "3"))  # marketing hero skips sub-$ penny names
 
@@ -6768,87 +6799,153 @@ def page_landing():
         """, unsafe_allow_html=True)
 
     with hr:
-        # On-brand product preview: a LIVE, continuously-scrolling Top Signals feed —
-        # conviction-ranked cards with custom icons + the data edge. Pure CSS marquee
-        # (guaranteed to animate everywhere — no scroll-timeline / JS dependency).
-        # LIVE Top Signals — real, conviction-ranked rows from the warm universe. NOTHING is
-        # fabricated: price/%/conviction are live, a sub-stat shows ONLY when the data is real (insider
-        # Form-4 buys or FINRA days-to-cover), and "% since signal" is the TRUE move from the locked
-        # entry snapshot (blank when we have no snapshot). Marketing polish: skip sub-$HERO_MIN_PRICE
-        # penny names and cap 2 per category so the feed looks varied. Honest "warming up" state when
-        # the scan hasn't completed — never placeholder cards with made-up prices.
-        def _sigcard(t, px, chg, sc, col, cat, sub, perf=None):
-            pxcol = "#34d399" if chg.startswith("▲") else "#fb7185"
-            perf_row = ""
-            if perf:
-                _age, _since, _scol = perf
-                perf_row = (f'<div class="sig-perf"><span class="sp-age">{_age}</span>'
-                            f'<span class="sp-pct" style="color:{_scol};">{_since}</span></div>')
-            return (f'<div class="sig"><div class="r1"><span class="tick">{t}</span>'
-                    f'<span class="px" style="color:{pxcol};">{px} {chg}</span></div>'
-                    f'<div class="cv"><div class="bar"><div class="fill" style="width:{max(4,min(100,sc))}%;background:{col};"></div></div>'
-                    f'<span class="num" style="color:{col};">{sc}</span></div>'
-                    f'<div class="tag">{cat_icon(cat,15)}<span>{_clean_name(cat)}<span class="sub">{sub}</span></span></div>{perf_row}</div>')
+        # LIVE Top Signals preview — real, conviction-ranked rows from the warm universe.
+        # NOTHING is fabricated: conviction is live, a sub-stat shows ONLY when the data is
+        # real (insider Form-4 buys or FINRA days-to-cover), and "% since signal" is the TRUE
+        # move from the locked entry snapshot. Honest "warming up" state when the scan hasn't
+        # completed — never placeholder cards with made-up numbers.
+        #
+        # Three deliberate choices here, all visible to logged-out visitors and crawlers:
+        #  1. TICKERS ARE REDACTED — masked to block glyphs server-side, then blurred so the
+        #     redaction reads as deliberate. The names ARE the product; the landing proves the
+        #     engine works without giving the day's picks away, and because the symbol never
+        #     reaches the DOM, view-source and crawlers can't lift it either. The headline
+        #     number on each card is the measured % since signal, not the price.
+        #  2. BOTH DIRECTIONS. The feed is split into LONG and SHORT sections so the bear/short
+        #     half of the engine is visible up front, plus a header pill carrying the day's
+        #     overall long/short split across every signal (not just the cards shown).
+        #  3. NO DUPLICATE CARDS. This used to be a CSS marquee that rendered the card list
+        #     TWICE to fake a seamless loop, so every ticker visibly appeared twice. It's a
+        #     static, de-duplicated list now — each signal appears exactly once.
+        def _sigcard(t, since, since_col, age, sc, col, cat, sub):
+            # since_col empty → no locked snapshot yet, so we say so instead of inventing a %.
+            since_html = (f'<span class="sp-pct" style="color:{since_col};">{since}</span>'
+                          if since_col else f'<span class="sp-new">{since}</span>')
+            return (f'<div class="sig"><div class="r1">'
+                    f'<span class="tlock">{_lock_svg(11)}</span>'
+                    f'<span class="tick">{t}</span><span class="tage">{age}</span>{since_html}</div>'
+                    f'<div class="r2"><span class="tag">{cat_icon(cat,14)}'
+                    f'<span>{_clean_name(cat)}<span class="sub">{sub}</span></span></span>'
+                    f'<div class="bar"><div class="fill" style="width:{max(4,min(100,sc))}%;background:{col};"></div></div>'
+                    f'<span class="num" style="color:{col};">{sc}</span></div></div>')
         def _hero_sub(r):
             info = r.get("info") or {}
             ib = int(info.get("insider_buys") or 0); dtc = float(info.get("dtc") or 0)
             if ib >= 2:  return f" · {ib} insider buys"
             if dtc >= 3: return f" · {dtc:.1f} days to cover"
             return ""
-        _live_rows = []
+        _HERO_LONG_N, _HERO_SHORT_N = 3, 2       # cards per direction section
+        _live_long, _live_short = [], []
         _snaps = {}
+        _n_long = _n_short = 0
         try:
             _warm = build_scored_universe()          # instant (cache-served, non-blocking)
             if _warm:
-                _ranked = _top_signals({"_": _warm}, n=24)   # pull extra, then filter + diversify
-                _snaps = _hero_snaps(_ranked)                # snapshots up-front → winners-only filter
-                _cat_seen = {}
-                for r in _ranked:
-                    if ((r.get("q") or {}).get("price", 0) or 0) < HERO_MIN_PRICE:
-                        continue                                  # skip penny names on the hero
-                    # Winners only (same rule as the Discover board): drop a pick that's
-                    # underwater in its own called direction; keep fresh/no-snapshot picks.
-                    _d, _ = _since_signal_pct(r.get("primary_cat", ""),
-                                              (_snaps.get(r.get("t")) or {}).get("entry_price", 0),
-                                              (r.get("q") or {}).get("price", 0))
-                    if _d is not None and _d < 0:
-                        continue
-                    _c = r.get("primary_cat", "")
-                    if _cat_seen.get(_c, 0) >= 2:
-                        continue                                  # max 2 per category for variety
-                    _cat_seen[_c] = _cat_seen.get(_c, 0) + 1
-                    _live_rows.append(r)
-                    if len(_live_rows) >= 6:
-                        break
-                if not _live_rows:                                # filters removed everything → fall back
-                    _live_rows = _ranked[:6]
+                # A "signal" is any warm row the engine assigned a primary category. The
+                # overall split below counts EVERY one of them — it's the day's real
+                # long/short breakdown, not a summary of the handful of cards on screen.
+                _sig_rows = [r for r in _warm if r.get("primary_cat")]
+                _short_rows = [r for r in _sig_rows if category_dir(r.get("primary_cat", "")) == "bear"]
+                _long_rows  = [r for r in _sig_rows if category_dir(r.get("primary_cat", "")) != "bear"]
+                _n_short, _n_long = len(_short_rows), len(_long_rows)
+
+                # Rank each side separately, then fetch snapshots ONCE for the combined
+                # candidate set so the winners-only filter has entry prices to measure.
+                _cand_l = _top_signals({"_": _long_rows}, n=24)
+                _cand_s = _top_signals({"_": _short_rows}, n=24)
+                _snaps = _hero_snaps(_cand_l + _cand_s)
+
+                def _hero_pick(cands, want):
+                    """Winners-only, ≥HERO_MIN_PRICE, one per category. Deterministic: a
+                    larger `want` returns a superset that starts with the smaller result,
+                    which is what lets the short-side backfill below stay duplicate-free."""
+                    out, cat_seen = [], {}
+                    for r in cands:
+                        if ((r.get("q") or {}).get("price", 0) or 0) < HERO_MIN_PRICE:
+                            continue                              # skip penny names on the hero
+                        # Winners only (same rule as the Discover board): drop a pick that's
+                        # underwater in its own called direction; keep fresh/no-snapshot picks.
+                        _d, _ = _since_signal_pct(r.get("primary_cat", ""),
+                                                  (_snaps.get(r.get("t")) or {}).get("entry_price", 0),
+                                                  (r.get("q") or {}).get("price", 0))
+                        if _d is not None and _d < 0:
+                            continue
+                        _c = r.get("primary_cat", "")
+                        # ONE per category. The in-app boards allow two, but here the ticker
+                        # is masked, so two cards from the same category with similar moves
+                        # are indistinguishable — they read as the duplicate rows this panel
+                        # is supposed to have stopped showing.
+                        if _c in cat_seen:
+                            continue
+                        cat_seen[_c] = 1
+                        out.append(r)
+                        if len(out) >= want:
+                            break
+                    return out
+
+                _live_long  = _hero_pick(_cand_l, _HERO_LONG_N)
+                _live_short = _hero_pick(_cand_s, _HERO_SHORT_N)
+                # Bear side quiet today (a normal, honest outcome in a strong tape)? Give the
+                # empty slots back to the long side so the panel never shows dead space — the
+                # short section header still says plainly that nothing qualified.
+                if len(_live_short) < _HERO_SHORT_N:
+                    _live_long = _hero_pick(_cand_l, _HERO_LONG_N + (_HERO_SHORT_N - len(_live_short)))
+                if not _live_long and not _live_short:   # filters removed everything → fall back
+                    _live_long, _live_short = _cand_l[:_HERO_LONG_N], _cand_s[:_HERO_SHORT_N]
         except Exception:
-            _live_rows = []
-        _sigs = []
-        for r in _live_rows:
-            q = r.get("q") or {}; price = q.get("price", 0) or 0; pct = q.get("pct", 0) or 0
+            _live_long, _live_short = [], []
+
+        def _hero_tuple(r):
+            """Row → _sigcard args. The ticker is MASKED here, not just visually blurred:
+            we emit block glyphs, so the day's picks are absent from the DOM entirely and
+            can't be lifted by view-source or a crawler."""
+            q = r.get("q") or {}; price = q.get("price", 0) or 0
             conv = int(r.get("conviction") or r.get("sc") or 0); cat = r.get("primary_cat", "") or ""
             _bear = category_dir(cat) == "bear"
             col = (("#fb7185" if conv >= 70 else "#fb923c" if conv >= 45 else "#94a3b8") if _bear
                    else ("#34d399" if conv >= 70 else "#f59e0b" if conv >= 45 else "#94a3b8"))
-            ar = "▲" if pct >= 0 else "▼"
-            # TRUE % since signal from the locked entry snapshot (never fabricated; blank if
-            # no snap). Shorts are measured as shorts — a decline shows positive/green.
-            _perf = None
+            mask = "█" * max(3, min(5, len(r.get("t", "") or "")))
+            # TRUE % since signal from the locked entry snapshot — never fabricated. With no
+            # snapshot yet we say "just signaled" rather than invent a number. Shorts are
+            # measured as shorts: a decline reads positive/green.
+            since, since_col, age = "Just signaled", "", ""
             _snap = _snaps.get(r.get("t"))
             if _snap:
                 _since, _is_short = _since_signal_pct(cat, _snap.get("entry_price", 0), price)
                 if _since is not None:
                     _sign = "+" if _since >= 0 else ""
-                    _lbl = "% since (short)" if _is_short else "% since"
-                    _perf = (f"Signaled {_humanize_age(_snap.get('triggered_at', 0))}",
-                             f"{_sign}{_since:.1f}{_lbl}", "#34d399" if _since >= 0 else "#fb7185")
-            _sigs.append((r.get("t", ""), f"${price:,.2f}", f"{ar}{abs(pct):.1f}%", conv, col, cat, _hero_sub(r), _perf))
-        _is_live = bool(_sigs)
-        _cards = "".join(_sigcard(*s) for s in _sigs)
+                    since = f'{_sign}{_since:.1f}% since'
+                    since_col = "#34d399" if _since >= 0 else "#fb7185"
+                    age = _humanize_age(_snap.get("triggered_at", 0))
+            return (mask, since, since_col, age, conv, col, cat, _hero_sub(r))
+
+        def _hero_section(rows, label, tone, count, empty_msg, extra_cls=""):
+            """One direction block: a labelled rule + its cards (or an honest empty note)."""
+            head = (f'<div class="sec {extra_cls}"><span class="sec-l" style="color:{tone};">{label}</span>'
+                    f'<span class="sec-r"></span>'
+                    f'<span class="sec-n">{count} today</span></div>')
+            if not rows:
+                return head + f'<div class="sec-empty">{empty_msg}</div>'
+            # Measured picks lead — the panel's job is to prove the engine, so cards that
+            # carry a real % since signal sort ahead of ones still waiting on a snapshot.
+            cards = [_hero_tuple(r) for r in rows]
+            cards.sort(key=lambda c: 0 if c[2] else 1)
+            return head + "".join(_sigcard(*c) for c in cards)
+
+        _is_live = bool(_live_long or _live_short)
         if _is_live:
-            _dot = '<span class="ldot"></span>'; _ppill = 'Live · Conviction-ranked'
-            _feed = f'<div class="feedwrap"><div class="feed">{_cards}{_cards}</div></div>'
+            _dot = '<span class="ldot"></span>'
+            _tot = _n_long + _n_short
+            # The header pill IS the overall split — today's whole signal set, both books.
+            _ppill = (f'{round(_n_long * 100 / _tot)}% long · {round(_n_short * 100 / _tot)}% short'
+                      if _tot else 'Live · Conviction-ranked')
+            _feed = ('<div class="feedwrap">'
+                     + _hero_section(_live_long, "▲ Long setups", "#34d399", _n_long,
+                                     "No long setups cleared the bar right now.")
+                     + _hero_section(_live_short, "▼ Short setups", "#fb7185", _n_short,
+                                     "No short setups qualified today — the engine only "
+                                     "flags the bear book when the setups are actually there.", "s2")
+                     + '</div>')
         else:
             _dot = '<span class="ldot" style="background:#5d6b86;animation:none;"></span>'; _ppill = 'Warming up…'
             _feed = ('<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;'
@@ -6866,27 +6963,38 @@ def page_landing():
         @keyframes pulse{{0%,100%{{box-shadow:0 0 0 0 rgba(52,211,153,.55);}}50%{{box-shadow:0 0 0 6px rgba(52,211,153,0);}}}}
         .ppill{{font-size:10px;font-weight:700;color:#a5b4fc;background:rgba(99,102,241,.12);
             border:1px solid rgba(99,102,241,.28);border-radius:999px;padding:3px 10px;}}
-        .feedwrap{{flex:1;min-height:0;overflow:hidden;
-            -webkit-mask:linear-gradient(180deg,transparent 0,#000 7%,#000 93%,transparent 100%);
-            mask:linear-gradient(180deg,transparent 0,#000 7%,#000 93%,transparent 100%);}}
-        .feed{{animation:feedup 24s linear infinite;}}
-        .feedwrap:hover .feed{{animation-play-state:paused;}}
-        @keyframes feedup{{from{{transform:translateY(0);}}to{{transform:translateY(-50%);}}}}
-        .sig{{background:#0c1322;border:1px solid #1a2740;border-radius:11px;padding:10px 12px;margin-bottom:8px;}}
-        .r1{{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;}}
-        .tick{{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:800;color:#f4f7ff;letter-spacing:.4px;}}
-        .px{{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#34d399;}}
-        .cv{{display:flex;align-items:center;gap:9px;margin-bottom:7px;}}
-        .bar{{flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;}}
+        /* Static list — no marquee. The old version animated a DOUBLED copy of the cards
+           to fake a seamless loop, which showed every signal twice. */
+        .feedwrap{{flex:1;min-height:0;overflow:hidden;}}
+        /* ── Direction section header ── */
+        .sec{{display:flex;align-items:center;gap:9px;margin:0 0 7px;}}
+        .sec.s2{{margin-top:11px;}}
+        .sec-l{{font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;flex-shrink:0;}}
+        .sec-r{{flex:1;height:1px;background:rgba(255,255,255,.08);}}
+        .sec-n{{font-size:10px;font-weight:600;color:#5d6b86;flex-shrink:0;}}
+        .sec-empty{{font-size:11px;color:#5d6b86;line-height:1.5;background:#0c1322;
+            border:1px dashed #1a2740;border-radius:10px;padding:9px 12px;margin-bottom:7px;}}
+        /* ── Signal card ── */
+        .sig{{background:#0c1322;border:1px solid #1a2740;border-radius:11px;padding:8px 12px;margin-bottom:7px;}}
+        .r1{{display:flex;align-items:center;gap:8px;margin-bottom:6px;}}
+        /* Ticker is redacted: these are block glyphs, not the real symbol (see _hero_tuple),
+           blurred so the redaction reads as deliberate rather than as a loading skeleton. */
+        .tick{{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:800;color:#41527a;
+            letter-spacing:1px;filter:blur(2.5px);user-select:none;flex-shrink:0;}}
+        .tlock{{display:inline-flex;color:#5d6b86;flex-shrink:0;}}
+        .tage{{font-size:10px;color:#5d6b86;flex-shrink:0;}}
+        .sp-pct{{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:14.5px;font-weight:800;flex-shrink:0;}}
+        .sp-new{{margin-left:auto;font-size:10px;font-weight:700;color:#a5b4fc;background:rgba(99,102,241,.12);
+            border:1px solid rgba(99,102,241,.28);border-radius:999px;padding:2px 8px;flex-shrink:0;}}
+        .r2{{display:flex;align-items:center;gap:9px;}}
+        .bar{{flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;min-width:30px;}}
         .fill{{height:6px;border-radius:3px;}}
-        .num{{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:800;min-width:22px;text-align:right;}}
-        .tag{{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#a5b4fc;}}
+        .num{{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:800;min-width:20px;text-align:right;}}
+        .tag{{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#a5b4fc;
+            min-width:0;flex:0 1 auto;max-width:56%;}}
+        .tag>span{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
         .tag .msp-ic{{color:#818cf8;flex-shrink:0;}}
         .sub{{color:#5d6b86;font-weight:600;}}
-        .sig-perf{{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:7px;
-            border-top:1px solid rgba(255,255,255,.06);font-size:10px;}}
-        .sp-age{{color:#5d6b86;}}
-        .sp-pct{{color:#34d399;font-weight:700;font-family:'JetBrains Mono',monospace;}}
         .pfoot{{font-size:10.5px;color:#5d6b86;text-align:center;margin-top:9px;}}
         .msp-ic{{vertical-align:-3px;}}
         </style>
@@ -6896,10 +7004,13 @@ def page_landing():
             <div class="ppill">{_ppill}</div>
           </div>
           {_feed}
-          <div class="pfoot">Scored from live market data, SEC filings &amp; short interest</div>
+          <div class="pfoot">🔒 Tickers hidden on the public preview · scored from live market
+          data, SEC filings &amp; short interest</div>
         </div>
         """
-        _html_iframe(hero_comp, 466)   # isolated iframe (sets html/body + generic classes)
+        # 500 (was 466): the two direction sections + their headers need the extra room, and
+        # the panel no longer scrolls, so anything that overflows would be silently clipped.
+        _html_iframe(hero_comp, 500)   # isolated iframe (sets html/body + generic classes)
 
     st.markdown('</div>', unsafe_allow_html=True)  # close hero-wrap
 
@@ -7208,7 +7319,7 @@ def page_features():
                     display:flex;align-items:center;justify-content:space-between;">
             <div>
                 <div style="font-size:14px;font-weight:700;color:{GOLD};">👑 Upgrade to unlock all premium features</div>
-                <div style="font-size:12px;color:#374f6e;margin-top:2px;">All 23 categories · Squeeze scanner · Market Scanner · Unlimited alerts</div>
+                <div style="font-size:12px;color:#374f6e;margin-top:2px;">All 23 categories · Squeeze scanner · Refine scanner · Unlimited alerts</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -7239,7 +7350,7 @@ def page_features():
         ("📊","Market Overview Dashboard","Live index data (NASDAQ, S&P 500, DOW, VIX, Russell), sector performance heatmap, market pulse indicator, and top trending tickers in a single clean view.","All plans"),
         ("⭐","Smart Watchlist","Track your stocks with automatic daily scoring. Premium users get watchlist analytics showing average score, % in the green, risk distribution, and sentiment breakdown across holdings.","All plans (Premium: analytics)"),
         ("🔔","Price Alerts","Set price-above or price-below alerts for any ticker. Alerts are managed from your account settings and displayed in your dashboard.","All plans"),
-        ("🔍","Market Scanner","Filter every stock from today's live scan by signal category, conviction, direction (long/short), RSI, volume, MACD, insider buying, fresh 8-K filings, days-to-cover, and price — instantly, with a built-in market-intelligence summary. Save your scans.","Premium"),
+        ("🔍","Refine scanner","Filter every stock from today's live scan by signal category, conviction, direction (long/short), RSI, volume, MACD, insider buying, fresh 8-K filings, days-to-cover, and price — instantly, with a built-in market-intelligence summary. Save your scans.","Premium"),
         ("📐","Signal-on-the-Chart","Each stock's detail page draws the detected setup right on the candles — the breakout level, bull-flag pole + box, squeeze bands, breakdown, or reversal — alongside a conviction-score breakdown, recent alerts, and full analysis.","Premium"),
         ("💥","Short Squeeze Scanner","Dedicated scanner identifying stocks with high short float (>10%), high days-to-cover, and rising momentum. Filters by social trending and volume to find squeeze setups before they run.","Premium"),
         ("📉→📈","Deep Stock Reports","Full stock detail pages with 60-day price chart + MA20/MA50 overlaid, volume bar chart vs average, complete plain-English analysis, social sentiment bar, score breakdown, why-flagged section, and related stocks.","Premium (charts)"),
@@ -7728,7 +7839,7 @@ def page_dashboard():
     st.markdown(f"""
     <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:18px;flex-wrap:wrap;gap:8px;">
         <div style="min-width:0;flex:1 1 auto;">
-            <div style="font-size:10px;font-weight:800;color:#4a5e7a;letter-spacing:2px;text-transform:uppercase;margin-bottom:5px;">Market Home</div>
+            <div style="font-size:10px;font-weight:800;color:#4a5e7a;letter-spacing:2px;text-transform:uppercase;margin-bottom:5px;">Market Overview</div>
             <div style="font-size:14px;color:#6b7fa0;margin-bottom:2px;">{greeting},</div>
             <div style="font-size:26px;font-weight:800;color:#e2e8f0;letter-spacing:-0.5px;overflow-wrap:anywhere;">{_esc(user_name)}</div>
         </div>
@@ -7751,54 +7862,12 @@ def page_dashboard():
     except Exception:
         pass
 
-    # ── Today's Top Signals teaser (the Conviction engine's best picks across every
-    #    category). Self-contained CSS so it doesn't depend on the Discover stylesheet. ──
-    try:
-        _hgrouped = _discover_grouped()
-    except Exception:
-        _hgrouped = {}
-    if _hgrouped:
-        st.markdown("""<style>
-        .hts-lbl{font-size:11px;font-weight:800;color:#4a5e7a;letter-spacing:2px;text-transform:uppercase;margin:4px 0 4px;}
-        .cv-card{background:linear-gradient(135deg,#0d1525,#0a0f1a);border:1px solid #1c2942;border-radius:12px;padding:12px 14px;min-height:120px;display:flex;flex-direction:column;gap:7px;margin-bottom:6px;transition:border-color .15s ease;}
-        .cv-card:hover{border-color:rgba(99,102,241,0.5);}
-        .cv-top{display:flex;justify-content:space-between;align-items:baseline;gap:6px;}
-        .cv-tick{font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:800;color:#f1f5f9;}
-        .cv-px{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;white-space:nowrap;}
-        .cv-conv{display:flex;align-items:center;gap:8px;}
-        .cv-bar{flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;}
-        .cv-fill{height:6px;border-radius:3px;}
-        .cv-num{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:800;min-width:24px;text-align:right;}
-        .cv-tag{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#a5b4fc;min-width:0;}
-        .cv-tag>span:first-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-        .cv-tag svg{color:#a5b4fc;flex-shrink:0;} .cv-prem{display:inline-flex;align-items:center;gap:3px;margin-left:auto;color:#f59e0b;font-size:10px;}
-        .cv-why{font-size:11px;color:#6b7fa0;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;flex:1;}
-        .cv-perf{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;padding-top:7px;border-top:1px solid rgba(255,255,255,0.06);font-size:10.5px;}
-        .cv-perf-age{color:#4a5e7a;}
-        </style>""", unsafe_allow_html=True)
-        st.markdown('<div class="hts-lbl">Today\'s Top Signals</div>', unsafe_allow_html=True)
-        # Same winners-only rule as the Discover board: pull a deep pool, then drop any
-        # pick that's underwater in its own called direction (longs must be flat/green
-        # since signal; shorts count a DECLINE as the win and stay, badged SHORT).
-        _hpool = _top_signals(_hgrouped, 18)
-        _hsnaps = _discover_lock_and_load_snaps(_hpool)
-        _htop = _winning_top_signals(_hpool, _hsnaps, 3)
-        _render_conviction_grid(_htop, "home_ts", _hsnaps)
-        _hc1, _hc2, _hc3 = st.columns([1, 1.6, 1])
-        with _hc2:
-            if st.button("Explore all signals →", key="home_explore_signals", use_container_width=True):
-                nav("discover")
-        st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
-
-    # ── Market Overview FIRST (this is the dashboard's purpose) ──
-    # NOTE: This page is intentionally Market Overview ONLY. Recommendation /
-    # signal content (formerly a "Featured Setup" card here) now lives in
-    # Discover, which is the product's core experience. Keeping Dashboard
-    # focused on market context avoids duplicating Discover and reduces clutter.
+    # ── Market Overview ONLY ──
+    # NOTE: This page is intentionally about the OVERALL MARKET — indexes, breadth,
+    # sectors, movers, buzz. Everything about the MODEL (Top Signals teaser, the
+    # track-record proof band, category performance) lives on the Performance page;
+    # signal browsing lives in Discover. No model content belongs here.
     st.markdown(f'<div style="font-size:11px;font-weight:700;color:#4a5e7a;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;">📊 MARKET OVERVIEW</div>',unsafe_allow_html=True)
-
-    # Live track-record proof band (how the signals have actually performed since firing).
-    render_signal_proof("overview")
 
     with st.spinner("Loading market data…"):
         idx=get_indexes(); secs=get_sectors(); movers=get_bi_movers()
@@ -8036,7 +8105,7 @@ def page_dashboard():
                 <div>
                     <div style="font-size:11px;font-weight:700;color:{GOLD};letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">👑 UPGRADE TO PREMIUM</div>
                     <div style="font-size:18px;font-weight:800;color:#e2e8f0;margin-bottom:6px;">Unlock 15 Premium Composite Categories + Real-Time Telegram Alerts</div>
-                    <div style="font-size:13px;color:#6b7fa0;">Insider Cluster · Short Squeeze · Relative Strength · Breakdown (short) · Market Scanner · Signal Charts</div>
+                    <div style="font-size:13px;color:#6b7fa0;">Insider Cluster · Short Squeeze · Relative Strength · Breakdown (short) · Refine scanner · Signal Charts</div>
                 </div>
             </div>
         </div>
@@ -8044,6 +8113,187 @@ def page_dashboard():
         if gold_btn("Start Premium — $19/month →", "dash_upgrade"): nav("pricing")
 
     st.markdown('</div>',unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────
+# PAGE: MODEL PERFORMANCE
+# ─────────────────────────────────────────────────────────────
+def page_performance():
+    """The MODEL's showcase page — everything about how Scanviction itself is doing,
+    pulled off the Market Overview (proof band, Top Signals teaser) and blended with
+    the Brief's what's-new stream: live track record, today's top performers since
+    their signals, win-rate by category (animated bars), and the model's latest
+    activity feed. The Market Overview page stays purely about the market."""
+    render_topbar("performance")
+    st.markdown('<div class="page-wrap pw-narrow">', unsafe_allow_html=True)
+
+    # Page-scoped animation kit. Entrance animations are SHORT one-shots (this page
+    # has no auto-refresh fragment, so they replay only on a real visit — the rerun-
+    # replay problem that got the old page-enter fade removed doesn't apply here).
+    st.markdown(f"""<style>
+    .pf-hd{{text-align:center;margin:6px 0 2px;}}
+    .pf-title{{font-size:26px;font-weight:900;color:#f1f5f9;letter-spacing:-0.6px;}}
+    .pf-sub{{font-size:12.5px;color:#374f6e;max-width:600px;margin:6px auto 0;line-height:1.55;}}
+    .pf-live{{display:inline-flex;align-items:center;gap:7px;font-size:10px;font-weight:800;color:#34d399;
+        letter-spacing:1.6px;text-transform:uppercase;background:rgba(52,211,153,0.08);
+        border:1px solid rgba(52,211,153,0.25);border-radius:999px;padding:4px 12px;margin-bottom:10px;}}
+    .pf-dot{{width:7px;height:7px;border-radius:50%;background:#34d399;animation:pfPulse 2s infinite;}}
+    @keyframes pfPulse{{0%,100%{{box-shadow:0 0 0 0 rgba(52,211,153,.5);}}50%{{box-shadow:0 0 0 6px rgba(52,211,153,0);}}}}
+    .pf-lbl{{font-size:11px;font-weight:800;color:#4a5e7a;letter-spacing:2.5px;text-transform:uppercase;
+        margin:26px 0 6px;text-align:center;}}
+    .pf-note{{font-size:12px;color:#374f6e;text-align:center;max-width:560px;margin:0 auto 14px;line-height:1.5;}}
+    /* Category performance bars — grow in from the left, staggered */
+    .pf-cat{{display:flex;align-items:center;gap:12px;background:#0d1525;border:1px solid #1c2942;
+        border-radius:11px;padding:10px 14px;margin-bottom:7px;
+        animation:pfUp .5s cubic-bezier(.22,1,.36,1) both;transition:border-color .15s ease,transform .15s ease;}}
+    .pf-cat:hover{{border-color:rgba(99,102,241,.45);transform:translateX(3px);}}
+    .pf-cat-ic{{display:inline-flex;flex-shrink:0;}}
+    .pf-cat-n{{font-size:12.5px;font-weight:700;color:#dbe4f1;min-width:0;overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap;flex:0 1 190px;}}
+    .pf-cat-bar{{flex:1;height:8px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;}}
+    .pf-cat-fill{{height:8px;border-radius:4px;transform-origin:left;animation:pfGrow .9s cubic-bezier(.22,1,.36,1) both;}}
+    @keyframes pfGrow{{from{{transform:scaleX(0);}}to{{transform:scaleX(1);}}}}
+    @keyframes pfUp{{from{{opacity:0;transform:translateY(8px);}}to{{opacity:1;transform:translateY(0);}}}}
+    .pf-cat-wr{{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:800;min-width:52px;text-align:right;}}
+    .pf-cat-meta{{font-size:10.5px;color:#4a5e7a;min-width:110px;text-align:right;white-space:nowrap;}}
+    /* Live activity rows — slide in, staggered */
+    .pf-evt{{display:flex;align-items:center;gap:10px;background:#0b1220;
+        border:1px solid #1c2942;border-radius:10px;padding:9px 13px;margin-bottom:6px;
+        animation:pfUp .45s cubic-bezier(.22,1,.36,1) both;}}
+    .pf-evt-t{{font-family:'JetBrains Mono',monospace;font-size:13.5px;font-weight:800;color:#f1f5f9;min-width:52px;}}
+    .pf-evt-cat{{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;min-width:0;
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
+    .pf-evt-sc{{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:800;border-radius:6px;padding:1px 7px;flex-shrink:0;}}
+    .pf-evt-age{{font-size:10px;color:#4a5e7a;margin-left:auto;flex-shrink:0;}}
+    .pf-evt-new{{font-size:8.5px;font-weight:800;letter-spacing:.5px;color:#34d399;background:rgba(52,211,153,.1);
+        border:1px solid rgba(52,211,153,.3);border-radius:5px;padding:1px 6px;flex-shrink:0;}}
+    </style>""", unsafe_allow_html=True)
+
+    st.markdown('<div class="pf-hd">'
+                '<div class="pf-live"><span class="pf-dot"></span>Live · updates with every scan</div>'
+                '<div class="pf-title">Model Performance</div>'
+                '<div class="pf-sub">How the Scanviction engine is actually doing — every signal is logged with a locked '
+                'entry price and timestamp the moment it fires, then measured in its called direction. '
+                'Educational only — not financial advice.</div></div>', unsafe_allow_html=True)
+
+    # ── 1) Live track record (the proof band that used to sit on Market Overview) ──
+    # This page LEADS with the band, so it can't silently render nothing: the band hides
+    # until at least 3 signals have resolved outcomes, which is exactly the cold-start a
+    # visitor needs explained. Every other section here has an empty state; so does this.
+    if not render_signal_proof("performance"):
+        st.markdown(
+            '<div style="background:linear-gradient(135deg,rgba(245,158,11,0.07),transparent);'
+            'border:1px solid rgba(245,158,11,0.22);border-radius:14px;padding:22px 20px;margin:8px 0 6px;">'
+            '<div style="font-size:10px;font-weight:800;color:#f59e0b;letter-spacing:2px;'
+            'text-transform:uppercase;margin-bottom:10px;">📈 Signal Track Record · building</div>'
+            '<div style="font-size:13px;color:#6b7fa0;line-height:1.6;">The engine is logging signals with '
+            'locked entry prices right now, but none have completed a measurement horizon yet — outcomes '
+            'resolve over 1–20 trading days, and we publish the aggregate only once at least three signals '
+            'have actually been measured.</div>'
+            '<div style="font-size:11.5px;color:#374f6e;margin-top:9px;">No estimates, no backfilled history: '
+            'this band fills in on its own as the first signals mature.</div></div>',
+            unsafe_allow_html=True)
+
+    # ── 2) Today's top performers — winners since their signal ──
+    st.markdown('<div class="pf-lbl">🏆 Top Performers · since signal</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pf-note">The model\'s current winners: longs in the green since they were flagged; '
+                'shorts labeled SHORT and measured as shorts (a decline = a win). Tap any card for the full breakdown.</div>',
+                unsafe_allow_html=True)
+    try:
+        _pgrouped = _discover_grouped()
+    except Exception:
+        _pgrouped = {}
+    if _pgrouped:
+        _ppool = _top_signals(_pgrouped, 18)
+        _psnaps = _discover_lock_and_load_snaps(_ppool)
+        _ptop = _winning_top_signals(_ppool, _psnaps, 6)
+        _render_conviction_grid(_ptop, "perf_ts", _psnaps)
+    else:
+        st.markdown('<div class="pf-note">The scan is warming — top performers appear in a moment.</div>',
+                    unsafe_allow_html=True)
+
+    # ── 3) Performance by category — animated win-rate bars from REAL outcomes ──
+    st.markdown('<div class="pf-lbl">📊 Performance by Category</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pf-note">Win rate per signal category across all matured, tracked signals '
+                '(demo data excluded). Bars fill as real outcomes accumulate at the 1–20 day horizons.</div>',
+                unsafe_allow_html=True)
+    _stats = {}
+    if HAS_SIGNAL_ENGINE:
+        try: _stats = get_category_performance_stats() or {}
+        except Exception: _stats = {}
+    _rows = sorted(((c, s) for c, s in _stats.items() if (s.get("count") or 0) > 0),
+                   key=lambda x: (x[1].get("win_rate") or 0, x[1].get("count") or 0), reverse=True)
+    if _rows:
+        _bars = []
+        for _bi, (_cat, _s) in enumerate(_rows[:14]):
+            _wr = float(_s.get("win_rate") or 0); _n = int(_s.get("count") or 0)
+            _avg = _s.get("avg_5d")
+            _ac = cat_accent(_cat)
+            _wc = GREEN if _wr >= 55 else GOLD if _wr >= 45 else RED
+            _avg_s = (f'avg 5d {"+" if _avg >= 0 else ""}{_avg:.1f}%' if _avg is not None else "maturing")
+            _bars.append(
+                f'<div class="pf-cat" style="animation-delay:{_bi*0.06:.2f}s;">'
+                f'<span class="pf-cat-ic" style="color:{_ac};">{cat_icon(_cat, 17)}</span>'
+                f'<span class="pf-cat-n">{_clean_name(_cat)}</span>'
+                f'<div class="pf-cat-bar"><div class="pf-cat-fill" style="width:{max(4, min(100, _wr)):.0f}%;'
+                f'background:linear-gradient(90deg,{_ac}66,{_ac});animation-delay:{0.15 + _bi*0.06:.2f}s;"></div></div>'
+                f'<span class="pf-cat-wr" style="color:{_wc};">{_wr:.0f}%</span>'
+                f'<span class="pf-cat-meta">{_n} signal{"s" if _n != 1 else ""} · {_avg_s}</span>'
+                f'</div>')
+        st.markdown("".join(_bars), unsafe_allow_html=True)
+    else:
+        st.markdown('<div style="background:#0d1525;border:1px solid rgba(255,255,255,0.08);border-radius:12px;'
+                    'padding:26px;text-align:center;font-size:12.5px;color:#374f6e;">Category stats appear as tracked '
+                    'signals mature (outcomes are measured over 1–20 trading days). The engine is logging signals now.</div>',
+                    unsafe_allow_html=True)
+
+    # ── 4) Latest model activity — newest signals & updates streaming in ──
+    st.markdown('<div class="pf-lbl">⚡ Latest Model Activity</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pf-note">The newest stocks to enter a signal category — your Daily Brief pings '
+                'these; this is the model working in real time.</div>', unsafe_allow_html=True)
+    _evts = []
+    if HAS_SIGNAL_ENGINE:
+        try: _evts = get_recent_signal_events(limit=10) or []
+        except Exception: _evts = []
+    if _evts:
+        _erows = []
+        for _ei, _e in enumerate(_evts):
+            _cat = _e.get("category", "") or ""
+            _t = _e.get("ticker", "?")
+            _scv = int(_e.get("score_at_trigger", 0) or 0)
+            try: _ets = datetime.fromisoformat(_e.get("triggered_at", "")).timestamp()
+            except Exception: _ets = 0
+            _agee = _humanize_age(_ets) if _ets else ""
+            _isnew = bool(_ets and (time.time() - _ets) < 6 * 3600)
+            _ac = cat_accent(_cat)
+            _scc = GREEN if _scv >= 65 else GOLD if _scv >= 40 else "#94a3b8"
+            _locked = _signal_is_locked(_cat)
+            _tick_html = (f'<span class="pf-evt-t" style="filter:blur(5px);user-select:none;">{_t}</span>'
+                          if _locked else f'<span class="pf-evt-t">{_t}</span>')
+            _erows.append(
+                f'<div class="pf-evt" style="animation-delay:{_ei*0.05:.2f}s;">{_tick_html}'
+                f'<span class="pf-evt-cat" style="color:{_ac};">{cat_icon(_cat, 13)}<span>{_clean_name(_cat)}</span></span>'
+                + (f'<span class="pf-evt-sc" style="color:{_scc};background:{_scc}1f;">{_scv}</span>' if _scv else "")
+                + ('<span class="pf-evt-new">NEW</span>' if _isnew else "")
+                + f'<span class="pf-evt-age">{_agee}</span></div>')
+        st.markdown("".join(_erows), unsafe_allow_html=True)
+    else:
+        st.markdown('<div style="background:#0d1525;border:1px solid rgba(255,255,255,0.08);border-radius:12px;'
+                    'padding:22px;text-align:center;font-size:12.5px;color:#374f6e;">No signal events logged yet — '
+                    'new category entries appear here as the market moves.</div>', unsafe_allow_html=True)
+
+    _pc1, _pc2 = st.columns(2, gap="small")
+    with _pc1:
+        if st.button("🔍 Browse all signals in Discover →", key="perf_to_disc", use_container_width=True, type="primary"):
+            st.session_state.discover_cat = DISCOVER_HOME
+            nav("discover")
+    with _pc2:
+        if st.button("🔔 Open your Daily Brief →", key="perf_to_brief", use_container_width=True):
+            nav("signals")
+
+    st.markdown('<div style="font-size:10px;color:#2a3a52;text-align:center;margin-top:16px;">'
+                'Every figure on this page is measured from locked entry snapshots — nothing is backfilled or curated. '
+                'Past performance does not guarantee future results.</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────
 # PAGE: DISCOVER
@@ -8060,6 +8310,28 @@ DISCOVER_THEMES = [
     ("🎭 Social, Value & Hidden",  ["🎭 Social Catalyst", "💎 Value Momentum", "💡 Hidden Movers"]),
     ("🐻 Bearish & Short",         ["📉 Breakdown", "🐻 Distribution", "🔻 Overbought Fade"]),
 ]
+
+# ── Per-THEME accent hues ─────────────────────────────────────────────────────
+# Every category used to render in the same indigo, so the Discover grid read as
+# one undifferentiated wall ("they all blend together"). Each theme family now
+# carries its own accent — used on tile borders, icons, count badges and card
+# category labels — while the base surfaces stay on the brand palette, so the
+# page stays on-theme but a Squeeze tile is instantly distinguishable from a
+# Reversal tile.
+THEME_ACCENT = {
+    "🔥 Momentum & Trend":        "#818cf8",   # indigo — the brand core
+    "📈 Breakouts & Volatility":  "#22d3ee",   # cyan
+    "📉 Reversals & Bottoms":     "#34d399",   # emerald
+    "⚡ Squeeze & Short Interest": "#f59e0b",   # amber
+    "🏛️ Smart Money & Catalysts": "#a78bfa",   # violet
+    "🎭 Social, Value & Hidden":  "#f472b6",   # pink
+    "🐻 Bearish & Short":         "#fb7185",   # rose
+}
+_CAT_THEME = {c: th for th, cats in DISCOVER_THEMES for c in cats}
+
+def cat_accent(cat):
+    """The accent hue for a category (via its theme), or brand indigo."""
+    return THEME_ACCENT.get(_CAT_THEME.get(cat, cat), "#818cf8")
 
 # Regime → themes to highlight + a one-line plain-English guide. GUIDANCE ONLY:
 # this never changes any score or hides any category — it just orients the user.
@@ -8234,7 +8506,7 @@ def _perf_since_html(r, snap):
 
 # Shared conviction-card styles. Previously these classes were only defined inside
 # page_dashboard / page_discover's inline <style> blocks, so the SAME cards rendered
-# as an unstyled "wall of text" on the Market Scanner results (and anywhere else the
+# as an unstyled "wall of text" on the Refine scanner results (and anywhere else the
 # grid is reused). The grid renderer now injects this once per script run.
 _CV_CARD_CSS = f"""<style>
 .cv-card{{background:linear-gradient(135deg,#0d1525,#0a0f1a);border:1px solid #1c2942;
@@ -8250,7 +8522,7 @@ _CV_CARD_CSS = f"""<style>
 .cv-num{{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:800;min-width:24px;text-align:right;}}
 .cv-tag{{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#a5b4fc;min-width:0;}}
 .cv-tag>span:first-of-type{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
-.cv-tag svg{{color:#a5b4fc;flex-shrink:0;}}
+.cv-tag svg{{color:currentColor;flex-shrink:0;}}  /* inherits the per-theme accent */
 .cv-prem{{display:inline-flex;align-items:center;gap:3px;margin-left:auto;color:{GOLD};font-size:10px;flex-shrink:0;}}
 .cv-short{{font-size:8.5px;font-weight:800;letter-spacing:.6px;color:#fb7185;background:rgba(251,113,133,.12);
     border:1px solid rgba(251,113,133,.35);border-radius:5px;padding:1px 5px;flex-shrink:0;}}
@@ -8283,17 +8555,20 @@ def _conviction_card_html(r, locked=False, snap=None):
     else:
         convc = GREEN if conv >= 70 else GOLD if conv >= 45 else RED
     short_b = '<span class="cv-short" style="margin-left:6px;">SHORT</span>' if is_bear else ""
+    # Per-theme accent on the category label + icon, so cards from different
+    # signal families are visually distinct at a glance.
+    ac = cat_accent(cat)
     if locked:
         head = ('<span class="cv-tick" style="filter:blur(5px);user-select:none;">NVDA</span>'
                 '<span class="cv-px" style="filter:blur(4px);user-select:none;">$000 ▲0%</span>')
-        tag = (f'<div class="cv-tag">{cat_icon(cat, 14)}<span>{_clean_name(cat)}</span>{short_b}'
+        tag = (f'<div class="cv-tag" style="color:{ac};">{cat_icon(cat, 14)}<span>{_clean_name(cat)}</span>{short_b}'
                f'<span class="cv-prem">{_lock_svg(11)} Premium</span></div>')
         body = f'<div class="cv-why" style="color:{GOLD};">Unlock to reveal this pick</div>'
         perf = ""
     else:
         head = (f'<span class="cv-tick">{t}</span>'
                 f'<span class="cv-px" style="color:{cc};">${price:,.2f} {ar}{abs(pct):.1f}%</span>')
-        tag = f'<div class="cv-tag">{cat_icon(cat, 14)}<span>{_clean_name(cat)}</span>{short_b}</div>'
+        tag = f'<div class="cv-tag" style="color:{ac};">{cat_icon(cat, 14)}<span>{_clean_name(cat)}</span>{short_b}</div>'
         body = f'<div class="cv-why">{why[:78]}{"…" if len(why) > 78 else ""}</div>'
         perf = _perf_since_html(r, snap)
     return (f'<div class="cv-card"><div class="cv-top">{head}</div>'
@@ -8433,8 +8708,10 @@ def _render_theme_browser(rg, grouped):
         opened = _theme_is_open(ti, focus or ti == 0)
         chev = "▾" if opened else "▸"
         foc = '<span class="th-focus">in focus</span>' if focus else ""
-        hdr = (f'<div class="th-head {"th-head-on" if opened else ""}">'
-               f'<span class="th-head-l">{cat_icon(theme, 18)}<span class="th-head-n">{_clean_name(theme)}</span>{foc}</span>'
+        _tac = cat_accent(theme)   # per-theme accent → header icon + live count
+        hdr = (f'<div class="th-head {"th-head-on" if opened else ""}" style="border-left:3px solid {_tac};">'
+               f'<span class="th-head-l"><span class="th-ic" style="color:{_tac};">{cat_icon(theme, 18)}</span>'
+               f'<span class="th-head-n">{_clean_name(theme)}</span>{foc}</span>'
                f'<span class="th-head-r">{len(active)}/{len(cats)} live <span class="th-chev">{chev}</span></span></div>')
         with st.columns(1)[0]:
             if clickable_tile(hdr, key=f"th_head_{ti}"):
@@ -8467,10 +8744,13 @@ def _category_tile_html(cat, rows, locked, standard=False):
         teaser = "".join(picks)
     else:
         teaser = '<span style="color:#3a4a63;">No matches right now</span>'
-    cnt = f'<span class="ct-count">{n}</span>' if (n and not locked) else ""
+    # Theme accent: left edge + icon + count badge, so each signal family is
+    # instantly distinguishable at a glance instead of a wall of identical indigo.
+    ac = cat_accent(cat)
+    cnt = f'<span class="ct-count" style="color:{ac};background:{ac}22;">{n}</span>' if (n and not locked) else ""
     short_b = '<span class="cv-short" style="margin-left:6px;">SHORT</span>' if is_bear else ""
-    return (f'<div class="cat-tile{" cat-tile-lock" if locked else ""}">'
-            f'<div class="ct-h"><span class="ct-ic">{cat_icon(cat, 19)}</span>'
+    return (f'<div class="cat-tile{" cat-tile-lock" if locked else ""}" style="border-left:3px solid {ac};">'
+            f'<div class="ct-h"><span class="ct-ic" style="color:{ac};">{cat_icon(cat, 19)}</span>'
             f'<span class="ct-n">{_clean_name(cat)}</span>{short_b}{cnt}</div>'
             f'<div class="ct-d">{cat_def(cat)}</div>'
             f'<div class="ct-f">{teaser}</div></div>')
@@ -8726,7 +9006,7 @@ def page_discover():
     .cv-num{{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:800;min-width:24px;text-align:right;}}
     .cv-tag{{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#a5b4fc;min-width:0;}}
     .cv-tag>span:first-of-type{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
-    .cv-tag svg{{color:#a5b4fc;flex-shrink:0;}}
+    .cv-tag svg{{color:currentColor;flex-shrink:0;}}  /* inherits the per-theme accent */
     .cv-prem{{display:inline-flex;align-items:center;gap:3px;margin-left:auto;color:{GOLD};font-size:10px;flex-shrink:0;}}
     .cv-short{{font-size:8.5px;font-weight:800;letter-spacing:.6px;color:#fb7185;background:rgba(251,113,133,.12);
         border:1px solid rgba(251,113,133,.35);border-radius:5px;padding:1px 5px;flex-shrink:0;}}
@@ -8769,16 +9049,20 @@ def page_discover():
     .th-head:hover{{border-color:rgba(99,102,241,0.45);background:#0f1830;}}
     .th-head-on{{border-color:rgba(99,102,241,0.4);background:linear-gradient(135deg,#0f1830,#0b1322);}}
     .th-head-l{{display:flex;align-items:center;gap:9px;min-width:0;}}
-    .th-head-l svg{{color:#a5b4fc;flex-shrink:0;}}
+    /* icon color comes from the per-theme accent wrapper (currentColor) */
+    .th-head-l svg{{flex-shrink:0;}}
+    .th-ic{{display:inline-flex;flex-shrink:0;color:#a5b4fc;}}
     .th-head-n{{font-size:14px;font-weight:800;color:#ffffff;letter-spacing:.2px;}}
     .th-focus{{font-size:9px;font-weight:700;color:{GOLD};background:rgba(245,158,11,0.12);
         border:1px solid rgba(245,158,11,0.3);border-radius:10px;padding:2px 8px;text-transform:uppercase;letter-spacing:.5px;}}
     .th-head-r{{font-size:11px;color:#4a5e7a;font-weight:600;white-space:nowrap;display:flex;align-items:center;gap:6px;}}
     .th-chev{{color:#6b7fa0;font-size:12px;}}
-    /* ── Clickable category tile ── */
+    /* ── Clickable category tile — smooth lift on hover, accent left edge ── */
     .cat-tile{{background:linear-gradient(135deg,#0c1322,#0a0f1a);border:1px solid #1a2740;border-radius:11px;
-        padding:12px 14px;min-height:98px;display:flex;flex-direction:column;gap:5px;margin-bottom:6px;transition:border-color .15s ease;}}
-    .cat-tile:hover{{border-color:rgba(99,102,241,0.5);}}
+        padding:12px 14px;min-height:98px;display:flex;flex-direction:column;gap:5px;margin-bottom:6px;
+        transition:border-color .18s ease, transform .18s cubic-bezier(.22,1,.36,1), box-shadow .18s ease;}}
+    .cat-tile:hover{{border-color:rgba(99,102,241,0.5);transform:translateY(-2px);
+        box-shadow:0 8px 22px rgba(0,0,0,0.35);}}
     .cat-tile-lock{{opacity:.92;}}
     .ct-h{{display:flex;align-items:center;gap:9px;}}
     .ct-ic{{display:inline-flex;color:#818cf8;flex-shrink:0;}}
@@ -10672,7 +10956,7 @@ def page_watchlist():
 # PAGE: SCREENER
 # ─────────────────────────────────────────────────────────────
 def page_screener():
-    """Market Scanner — filters the LIVE scanned universe (already scored + assigned a
+    """Refine scanner — filters the LIVE scanned universe (already scored + assigned a
     primary signal category at warm) entirely in-memory. No hardcoded ticker lists, no
     re-fetch: every match is a real stock we scanned today. Folds the old BI page's
     value in as a market-intelligence summary up top."""
@@ -10680,11 +10964,11 @@ def page_screener():
     render_topbar("screener")
     st.markdown('<div class="page-wrap">', unsafe_allow_html=True)
     back_button("scr_back")
-    st.markdown('<div style="font-size:24px;font-weight:800;color:#e2e8f0;margin-bottom:4px;">\U0001F50D Market Scanner</div>', unsafe_allow_html=True)
-    st.markdown('<div style="font-size:13px;color:#374f6e;margin-bottom:16px;">Filter every stock we scanned today by signal, conviction and technicals — instant, straight from the live scan (no re-fetch).</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:24px;font-weight:800;color:#e2e8f0;margin-bottom:4px;">🎛️ Refine</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:13px;color:#374f6e;margin-bottom:16px;">Refine today\'s live signals — filter everything the engine scanned by signal category, conviction, direction and technicals. Instant, straight from the live scan (no re-fetch).</div>', unsafe_allow_html=True)
 
     if not is_premium():
-        render_lock("Market Scanner")
+        render_lock("Refine scanner")
         st.markdown('</div>', unsafe_allow_html=True); return
 
     universe = build_scored_universe()
@@ -11934,7 +12218,7 @@ def page_settings():
         </div>""", unsafe_allow_html=True)
 
         if not is_premium():
-            st.markdown('<div style="font-size:12px;color:#374f6e;margin-bottom:10px;">Upgrade to unlock all 23 composite categories, the Market Scanner, signal charts, and more.</div>',unsafe_allow_html=True)
+            st.markdown('<div style="font-size:12px;color:#374f6e;margin-bottom:10px;">Upgrade to unlock all 23 composite categories, the Refine scanner, signal charts, and more.</div>',unsafe_allow_html=True)
             uc1,uc2=st.columns(2,gap="small")
             with uc1:
                 if gold_btn("👑 Upgrade to Premium — $19/mo","set_prem_mo"):
@@ -12794,7 +13078,7 @@ SIGNAL CATEGORIES (23 total; each stock is assigned ONE best-fit category, no ov
 
 KEY FEATURES
 - Discover: Top Signals home + a themed category browser.
-- Market Scanner: filters the live scanned universe by signal, conviction, direction (long/short), RSI, volume, MACD, insider buying, fresh 8-K, days-to-cover, price and category. (This replaced the old separate Screener + BI pages.)
+- Refine scanner: filters the live scanned universe by signal, conviction, direction (long/short), RSI, volume, MACD, insider buying, fresh 8-K, days-to-cover, price and category. (This replaced the old separate Screener + BI pages.)
 - Stock detail page: a "Signal on the Chart" view that draws the detected pattern (breakout line, bull flag, squeeze bands, breakdown, reversal) right on the candles, plus a conviction-score breakdown, recent alerts and fundamentals.
 - Alerts: notifies you when a stock newly enters a category, when insiders buy, when an 8-K drops, or on short-interest surges — in-app feed plus optional email/Telegram/push.
 - Watchlist and a signal track-record (outcome tracking).
@@ -12803,7 +13087,7 @@ DATA SOURCES: Polygon.io (whole-market price/volume), SEC EDGAR (insider Form 4 
 
 PLANS
 - Free: market overview, 7 free categories, RSI/MACD signals, watchlist (10 stocks), BUY/AVOID.
-- Premium $19/mo: all 23 categories incl. bear/short, the Market Scanner, squeeze scanner, conviction breakdowns, signal charts, unlimited watchlist, saved scans.
+- Premium $19/mo: all 23 categories incl. bear/short, the Refine scanner, squeeze scanner, conviction breakdowns, signal charts, unlimited watchlist, saved scans.
 - Annual $149/yr: everything in Premium + priority support, CSV export, early access.
 - Billing is via Stripe (in-page checkout). Cancel anytime in Settings → Subscription.
 
@@ -12927,7 +13211,7 @@ if st.session_state.get("_redirect_url"):
         </div>
         <div style="background:#080b14;border:1px solid {BORDER};border-radius:10px;padding:16px 18px;margin-bottom:16px;">
             <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:8px;">What you get immediately:</div>
-            <div style="font-size:13px;color:#374f6e;line-height:2.2;">✅&nbsp; All 23 composite signal categories (incl. bear/short)<br>✅&nbsp; Market Scanner + short-squeeze scanner<br>✅&nbsp; Signal charts &amp; conviction breakdowns<br>✅&nbsp; Plain-English insights<br>✅&nbsp; Unlimited watchlist &amp; price alerts</div>
+            <div style="font-size:13px;color:#374f6e;line-height:2.2;">✅&nbsp; All 23 composite signal categories (incl. bear/short)<br>✅&nbsp; Refine scanner + short-squeeze scanner<br>✅&nbsp; Signal charts &amp; conviction breakdowns<br>✅&nbsp; Plain-English insights<br>✅&nbsp; Unlimited watchlist &amp; price alerts</div>
         </div>
         """, unsafe_allow_html=True)
         # Native link button navigates reliably. A raw <a target="_top"> inside st.markdown renders
@@ -12947,7 +13231,7 @@ if st.session_state.get("_redirect_url"):
         </div>
         <div style="background:#0d1525;border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:18px;margin-top:12px;">
             <div style="font-size:12px;font-weight:700;color:{GREEN};margin-bottom:8px;">After Payment ✓</div>
-            <div style="font-size:12px;color:#374f6e;line-height:2.2;">1. Account upgrades instantly<br>2. All premium categories unlock<br>3. Set up watchlist &amp; alerts<br>4. Explore the Market Scanner<br>5. Configure email digests</div>
+            <div style="font-size:12px;color:#374f6e;line-height:2.2;">1. Account upgrades instantly<br>2. All premium categories unlock<br>3. Set up watchlist &amp; alerts<br>4. Explore the Refine scanner<br>5. Configure email digests</div>
         </div>
         <div style="margin-top:12px;text-align:center;font-size:12px;color:#2a3a52;">Questions? <span style="color:#a5b4fc;font-weight:600;">support@scanviction.com</span></div>
         """, unsafe_allow_html=True)
@@ -12988,7 +13272,7 @@ if st.session_state.get("_pay_success"):
         </div>
         <div style="font-size:14px;color:#374f6e;margin-bottom:20px;line-height:1.7;">
             Your account has been upgraded. You now have access to all {plan_name} features.<br>
-            Start exploring all 23 composite categories, the short-squeeze scanner, and the full Market Scanner.
+            Start exploring all 23 composite categories, the short-squeeze scanner, and the full Refine scanner.
         </div>
         <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
             <span style="background:rgba(34,197,94,0.1);color:#4ade80;font-size:12px;font-weight:700;
@@ -13001,7 +13285,7 @@ if st.session_state.get("_pay_success"):
             </span>
             <span style="background:rgba(34,197,94,0.1);color:#4ade80;font-size:12px;font-weight:700;
                          padding:6px 16px;border-radius:20px;border:1px solid rgba(34,197,94,0.3);">
-                ✅ Market Scanner enabled
+                ✅ Refine scanner enabled
             </span>
         </div>
     </div>
@@ -13012,7 +13296,7 @@ if st.session_state.get("_pay_success"):
         if st.button("🎯 Explore Premium Categories", key="ps_disc", type="primary", use_container_width=True):
             nav("discover")
     with _qa2:
-        if st.button("🔍 Open Market Scanner", key="ps_bi", use_container_width=True):
+        if st.button("🔍 Open Refine scanner", key="ps_bi", use_container_width=True):
             nav("screener")
     with _qa3:
         if st.button("🔔 Set Up Alerts", key="ps_alerts", use_container_width=True):
@@ -13096,9 +13380,9 @@ if _need is not None and not can_access(page):
             nav("dashboard")
         st.markdown('</div>', unsafe_allow_html=True)
     else:  # premium gate
-        _titles = {"bi_dashboard": ("🔍 Market Scanner",
+        _titles = {"bi_dashboard": ("🔍 Refine scanner",
                                     "Filter every scanned stock by signal, conviction, and technicals — with a live market-intelligence summary."),
-                   "screener":     ("🔍 Market Scanner",
+                   "screener":     ("🔍 Refine scanner",
                                     "Filter every scanned stock by signal, conviction, and technicals — instant, from the live scan.")}
         _t, _d = _titles.get(page, ("⭐ Premium Feature", "Upgrade to unlock this feature."))
         render_topbar(page)
@@ -13123,8 +13407,9 @@ else:
     elif page=="discover":     page_discover()
     elif page=="watchlist":    page_watchlist()
     elif page=="screener":     page_screener()
-    elif page=="bi_dashboard": page_screener()   # BI folded into the Market Scanner
+    elif page=="bi_dashboard": page_screener()   # BI folded into the Refine scanner
     elif page=="signals":      page_signals()
+    elif page=="performance":  page_performance()
     elif page=="signal_track": page_signal_track()
     elif page=="stock_detail": page_detail()
     elif page=="settings":     page_settings()
