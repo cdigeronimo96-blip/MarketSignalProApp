@@ -2387,7 +2387,10 @@ PAGE_ACCESS = {
     "settings": "auth", "signal_track": "auth", "signals": "auth",
     "stock_detail": "auth", "performance": "auth",
     # premium
-    "screener": "premium", "bi_dashboard": "premium",
+    # Retired: both now route to the Brief, which is auth-level. Left in the map (rather
+    # than deleted) so a stale bookmark still hits the auth gate instead of falling through
+    # to can_access()'s "unlisted means public" default.
+    "screener": "auth", "bi_dashboard": "auth",
     # admin
     "admin": "admin",
 }
@@ -5911,7 +5914,7 @@ def render_lock(name=""):
                     border:1px solid rgba(245,158,11,0.3);margin-bottom:14px;">PREMIUM FEATURE</div>
         <div style="font-size:13px;color:#374f6e;margin-bottom:6px;line-height:1.7;">
             Upgrade to Premium to unlock all 23 composite signal categories (incl. bear/short),<br>
-            plus the Refine scanner, signal charts, the short-squeeze scanner, and unlimited alerts.
+            plus advanced Brief filters, signal charts, the short-squeeze scanner, and unlimited alerts.
         </div>
         <div style="font-size:12px;color:#2a3a52;margin-bottom:20px;">Founding price: $19/month · Cancel anytime · No contracts</div>
     </div>""", unsafe_allow_html=True)
@@ -6334,23 +6337,23 @@ def render_topbar(active=None):
         except Exception:
             pass
         _sig_lbl = "🔔 Brief" + (f" ({_unseen})" if _unseen else "")
-        # Nav order tells the product story: the overall MARKET first, how the MODEL
-        # is performing, then the signal surfaces (Discover → Brief → Refine), then
-        # the personal/utility tabs. "Refine" = the old Refine scanner (it filters
-        # the CURRENT signals by parameters — "Scanner" wrongly implied a new scan).
-        # "Market" not "Market Overview": with an owner/admin signed in there are nine tabs
-        # plus the logo and account menu, and the longest label was squeezing every other
-        # pill. The page still titles itself "Market Overview" in its own header, and the
-        # bottom (PWA) nav already used "Market", so this is also the consistent name.
-        # Each label says what the page IS, and the pair reads as a sentence: Discover is
-        # what the engine is calling right now, Results is how those calls worked out.
-        # "Performance" was ambiguous — performance of the market, or of the model? — and
-        # "Track Record" was already taken by the deep-dive page in the sidebar.
+        # Nav order tells the product story: the overall MARKET, then how the model's calls
+        # worked out (Results), then what it's calling now (Discover) and what just changed
+        # (Brief) — then the two marketing tabs.
+        #
+        # Deliberately NOT here:
+        #  • Refine — filtering belongs with the feed you're filtering, so it moved inside
+        #    the Brief. A separate tab for narrowing the same data was a surface users had
+        #    to remember existed.
+        #  • Watchlist — personal state, not a place you browse. It's in the account menu,
+        #    which already carried an entry for it.
+        # Both removals bought width the remaining labels needed: with an owner signed in
+        # there were nine tabs plus logo and account menu, and every pill was truncating to
+        # "Ma…" / "Disco…". Same reason "Market Overview" is just "Market" here — the page
+        # still titles itself in full, and the PWA bottom nav already said "Market".
         pages = [("Market","dashboard"), ("Results","performance"),
-                 ("Discover","discover"), (_sig_lbl,"signals")]
-        if is_premium():   # Refine (signal filtering) is premium-only — hide it from the free-user nav
-            pages.append(("Refine","screener"))
-        pages += [("Watchlist","watchlist"),("Pricing","pricing"),("Contact","contact")]
+                 ("Discover","discover"), (_sig_lbl,"signals"),
+                 ("Pricing","pricing"), ("Contact","contact")]
         if is_admin(): pages.append(("Admin","admin"))
 
         ri = {"owner":"👑","admin":"🛡️","premium":"⭐","free":"👤"}.get(st.session_state.role,"👤")
@@ -6557,8 +6560,6 @@ def render_sidebar():
                     st.session_state.discover_cat=cat; nav("discover")
             st.markdown('<div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.2);letter-spacing:1.5px;text-transform:uppercase;padding:12px 18px 5px;">Tools</div>',unsafe_allow_html=True)
             _tools = [("📊","Market Overview","dashboard"),("📈","Results","performance"),("⭐","Watchlist","watchlist")]
-            if is_premium():   # Scanner is premium-only — hide from free-user nav
-                _tools.append(("🔍","Refine scanner","screener"))
             # "Full Track Record", not "Signal Track Record": this is the per-horizon audit
             # (1/3/5/10/30-day vs the S&P) that the Results page summarises. Naming it as the
             # deep version of Results says which to open; two "track record" pages did not.
@@ -6764,12 +6765,18 @@ def page_landing():
     .hero-wrap [data-testid="column"]:first-child {{ padding-right:8px !important; }}
     .hero-wrap [data-testid="column"]:last-child  {{ padding-left:8px !important; padding-top:30px !important; }}
     @media(max-width:900px){{ .hero-wrap [data-testid="column"]:last-child {{ padding-top:6px !important; }} }}
-    /* Hero typography */
-    .hero-eyebrow {{ font-size:10px; font-weight:800; color:{BLUE}; letter-spacing:2.5px; text-transform:uppercase; margin-bottom:14px; }}
-    .hero-h1 {{ font-size:44px !important; font-weight:900; color:#f1f5f9; line-height:1.06; letter-spacing:-2px; margin:0 0 14px; }}
+    /* Hero typography. Weights are deliberately one step lighter than they were: the
+       headline sat at 900 with -2px tracking, which crushed the letters together, and the
+       sub-copy inherited a semibold from Streamlit's base so the whole block read as one
+       undifferentiated slab of bold. 800/400 with looser tracking gives the headline its
+       emphasis back BY CONTRAST with the body text, rather than by shouting alongside it. */
+    .hero-eyebrow {{ font-size:10px; font-weight:700; color:{BLUE}; letter-spacing:2.2px; text-transform:uppercase; margin-bottom:14px; }}
+    .hero-h1 {{ font-size:44px !important; font-weight:800; color:#f1f5f9; line-height:1.1; letter-spacing:-1.1px; margin:0 0 16px; }}
     .hero-h1 .hi {{ color:{BLUE}; }}
     .hero-h1 .hg {{ color:{GOLD}; }}
-    .hero-sub {{ font-size:15px; color:#4a5e7a; line-height:1.7; margin:0 0 24px; max-width:420px; }}
+    .hero-sub {{ font-size:15.5px; font-weight:400 !important; color:#8195b3; line-height:1.72;
+        letter-spacing:0; margin:0 0 24px; max-width:430px; }}
+    .hero-sub b, .hero-sub strong {{ font-weight:600 !important; color:#a5b4fc; }}
     /* CTA buttons - constrained width */
     .hero-cta-wrap .stButton>button {{
         max-width:400px !important;
@@ -6806,7 +6813,7 @@ def page_landing():
         <div style="padding:12px 0 16px;">
             <div class="hero-eyebrow">Whole-Market Signal Engine</div>
             <div class="hero-h1">Every setup in<br>the market,<br><span class="hi">ranked by</span> <span class="hg">conviction.</span></div>
-            <div class="hero-sub">We score ~2,500 of the most liquid U.S. stocks across 23 signal categories every session — blending live price action, SEC insider filings, real short interest and money flow into one 0–100 <b style="color:#a5b4fc;">Conviction Score</b>. The strongest setups, surfaced first.</div>
+            <div class="hero-sub">Every session we score ~2,500 of the most liquid U.S. stocks on price action, SEC insider filings, real short interest and money flow. Each one gets a single <b>Conviction Score</b> from 0 to 100, so the strongest setups surface first.</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -6867,11 +6874,13 @@ def page_landing():
                     f'<span class="num" style="color:{accent};">{sc}</span>'
                     f'<span class="met" style="color:{metric_col};">{metric}</span></div>')
         def _hero_sub(r):
+            # Days-to-cover is deliberately NOT shown here. On the single-line hero rows it
+            # was long enough to push the category name into an ellipsis ("Breakdown · 16.1
+            # days to c…"), and it's jargon that means nothing to a first-time visitor. It
+            # still appears on the in-app cards, where there's room and context for it.
             info = r.get("info") or {}
-            ib = int(info.get("insider_buys") or 0); dtc = float(info.get("dtc") or 0)
-            if ib >= 2:  return f" · {ib} insider buys"
-            if dtc >= 3: return f" · {dtc:.1f} days to cover"
-            return ""
+            ib = int(info.get("insider_buys") or 0)
+            return f" · {ib} insider buys" if ib >= 2 else ""
         _HERO_SINCE_N, _HERO_TODAY_N = 3, 2      # rows per "since signal" / "today" section
         _sec_long_since = _sec_long_today = _sec_short_since = _sec_short_today = []
         _snaps = {}
@@ -7340,7 +7349,7 @@ def page_features():
                     display:flex;align-items:center;justify-content:space-between;">
             <div>
                 <div style="font-size:14px;font-weight:700;color:{GOLD};">👑 Upgrade to unlock all premium features</div>
-                <div style="font-size:12px;color:#374f6e;margin-top:2px;">All 23 categories · Squeeze scanner · Refine scanner · Unlimited alerts</div>
+                <div style="font-size:12px;color:#374f6e;margin-top:2px;">All 23 categories · Squeeze scanner · Advanced Brief filters · Unlimited alerts</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -7371,7 +7380,7 @@ def page_features():
         ("📊","Market Overview Dashboard","Live index data (NASDAQ, S&P 500, DOW, VIX, Russell), sector performance heatmap, market pulse indicator, and top trending tickers in a single clean view.","All plans"),
         ("⭐","Smart Watchlist","Track your stocks with automatic daily scoring. Premium users get watchlist analytics showing average score, % in the green, risk distribution, and sentiment breakdown across holdings.","All plans (Premium: analytics)"),
         ("🔔","Price Alerts","Set price-above or price-below alerts for any ticker. Alerts are managed from your account settings and displayed in your dashboard.","All plans"),
-        ("🔍","Refine scanner","Filter every stock from today's live scan by signal category, conviction, direction (long/short), RSI, volume, MACD, insider buying, fresh 8-K filings, days-to-cover, and price — instantly, with a built-in market-intelligence summary. Save your scans.","Premium"),
+        ("🔍","Advanced Brief filters","Narrow your Daily Brief to exactly the signals you care about: by category, by score, by direction (long/short) and by each category's tracked win rate, so you only see setups from the signal families that have actually been working.","Premium"),
         ("📐","Signal-on-the-Chart","Each stock's detail page draws the detected setup right on the candles — the breakout level, bull-flag pole + box, squeeze bands, breakdown, or reversal — alongside a conviction-score breakdown, recent alerts, and full analysis.","Premium"),
         ("💥","Short Squeeze Scanner","Dedicated scanner identifying stocks with high short float (>10%), high days-to-cover, and rising momentum. Filters by social trending and volume to find squeeze setups before they run.","Premium"),
         ("📉→📈","Deep Stock Reports","Full stock detail pages with 60-day price chart + MA20/MA50 overlaid, volume bar chart vs average, complete plain-English analysis, social sentiment bar, score breakdown, why-flagged section, and related stocks.","Premium (charts)"),
@@ -8126,7 +8135,7 @@ def page_dashboard():
                 <div>
                     <div style="font-size:11px;font-weight:700;color:{GOLD};letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">👑 UPGRADE TO PREMIUM</div>
                     <div style="font-size:18px;font-weight:800;color:#e2e8f0;margin-bottom:6px;">Unlock 15 Premium Composite Categories + Real-Time Telegram Alerts</div>
-                    <div style="font-size:13px;color:#6b7fa0;">Insider Cluster · Short Squeeze · Relative Strength · Breakdown (short) · Refine scanner · Signal Charts</div>
+                    <div style="font-size:13px;color:#6b7fa0;">Insider Cluster · Short Squeeze · Relative Strength · Breakdown (short) · Brief filters · Signal Charts</div>
                 </div>
             </div>
         </div>
@@ -8615,7 +8624,7 @@ def _perf_since_html(r, snap):
 
 # Shared conviction-card styles. Previously these classes were only defined inside
 # page_dashboard / page_discover's inline <style> blocks, so the SAME cards rendered
-# as an unstyled "wall of text" on the Refine scanner results (and anywhere else the
+# as an unstyled "wall of text" wherever the grid was reused (and anywhere else the
 # grid is reused). The grid renderer now injects this once per script run.
 _CV_CARD_CSS = f"""<style>
 .cv-card{{background:linear-gradient(135deg,#0d1525,#0a0f1a);border:1px solid #1c2942;
@@ -10130,6 +10139,7 @@ def page_signals():
 
     st.markdown('<div style="font-size:22px;font-weight:800;color:#e2e8f0;margin-bottom:2px;">Daily Brief</div>'
                 '<div style="font-size:13px;color:#374f6e;margin-bottom:16px;">What\'s new since you last looked — stocks newly entering a signal category, open-market insider buys, fresh SEC 8-K catalysts and short-interest surges — newest first, no scanning required. This is the "what changed" companion to <span style="color:#818cf8;font-weight:600;">Discover</span> (the full ranked board). '
+                'Filter it by type, category, score, direction and category win rate below. '
                 'Want it pushed to your phone, browser or email? Turn it on in <span style="color:#818cf8;font-weight:600;">Settings → Alerts</span>.</div>',
                 unsafe_allow_html=True)
 
@@ -10143,7 +10153,10 @@ def page_signals():
         try: seed_demo_signal_history(_demo_price); events = get_recent_signal_events(limit=80)
         except Exception: pass
 
-    # ── In-app filter controls (the non-overbearing knobs) ──
+    # ── Filters ──
+    # These absorbed the retired Refine page. Filtering belongs with the feed it filters,
+    # not on a separate tab you have to remember exists — and Refine's own copy admitted it
+    # only ever narrowed the CURRENT signals, which is exactly what this feed holds.
     TYPE_OPTS = ["All", "Signal entries", "Insider buys", "8-K filings", "Short interest"]
     _type = st.radio("Show", TYPE_OPTS, horizontal=True, key="sig_type_filter", label_visibility="collapsed")
     fc1, fc2 = st.columns([3, 1])
@@ -10159,6 +10172,38 @@ def page_signals():
     with fc2:
         min_sc = st.slider("Min score", 0, 100, 0, key="sig_min_sc")
 
+    # Direction + historical win rate. Premium — this is the capability Refine used to sell,
+    # and it's the pair that turns a chronological feed into a research tool: "only shorts,
+    # only from categories that have actually been right more than half the time".
+    _win_by_cat = {}
+    if HAS_SIGNAL_ENGINE:
+        try:
+            _win_by_cat = {c: float(s.get("win_rate") or 0)
+                           for c, s in (get_category_performance_stats() or {}).items()
+                           if (s.get("count") or 0) > 0}
+        except Exception:
+            _win_by_cat = {}
+    _dir, _min_win = "All", 0
+    if is_premium():
+        ac1, ac2 = st.columns([1.4, 2])
+        with ac1:
+            _dir = st.radio("Direction", ["All", "Long", "Short"], horizontal=True,
+                            key="sig_dir_filter")
+        with ac2:
+            _min_win = st.slider(
+                "Min category win rate %", 0, 100, 0, step=5, key="sig_min_win",
+                help="Keep only signals from categories whose tracked outcomes have been "
+                     "correct at least this often. Categories with no resolved outcomes yet "
+                     "are hidden once this is above 0.")
+    elif events:
+        # Gate on "there is a feed", not on "_feed_cats is non-empty" — a feed made up
+        # entirely of insider/8-K/short-interest rows has no categories but is still
+        # perfectly filterable by direction and win rate.
+        st.markdown(f'<div style="font-size:11.5px;color:{GOLD};background:rgba(245,158,11,.07);'
+                    'border:1px solid rgba(245,158,11,.22);border-radius:9px;padding:8px 12px;'
+                    'margin:2px 0 10px;">👑 Premium adds direction (long/short) and a minimum '
+                    'category win-rate filter to this feed.</div>', unsafe_allow_html=True)
+
     def _evt_kind(c):
         return {EVT_INSIDER: "Insider buys", EVT_8K: "8-K filings",
                 EVT_SHORT: "Short interest"}.get(c, "Signal entries")
@@ -10167,6 +10212,16 @@ def page_signals():
     if cats:
         events = [e for e in events if e.get("category") in cats]
     events = [e for e in events if (e.get("score_at_trigger", 0) or 0) >= min_sc]
+    if _dir != "All":
+        _want_bear = (_dir == "Short")
+        # Event rows (insider / 8-K / short-interest) aren't directional calls, so a
+        # direction filter has nothing to say about them — they drop out rather than
+        # being silently counted as longs.
+        events = [e for e in events
+                  if e.get("category") not in EVENT_ALERT_TYPES
+                  and (category_dir(e.get("category", "")) == "bear") == _want_bear]
+    if _min_win > 0:
+        events = [e for e in events if _win_by_cat.get(e.get("category", ""), -1) >= _min_win]
 
     if not events:
         st.markdown('<div class="card" style="text-align:center;padding:40px 24px;">'
@@ -11074,598 +11129,13 @@ def page_watchlist():
 # ─────────────────────────────────────────────────────────────
 # PAGE: SCREENER
 # ─────────────────────────────────────────────────────────────
-def page_screener():
-    """Refine scanner — filters the LIVE scanned universe (already scored + assigned a
-    primary signal category at warm) entirely in-memory. No hardcoded ticker lists, no
-    re-fetch: every match is a real stock we scanned today. Folds the old BI page's
-    value in as a market-intelligence summary up top."""
-    from collections import Counter
-    render_topbar("screener")
-    st.markdown('<div class="page-wrap">', unsafe_allow_html=True)
-    back_button("scr_back")
-    st.markdown('<div style="font-size:24px;font-weight:800;color:#e2e8f0;margin-bottom:4px;">🎛️ Refine</div>', unsafe_allow_html=True)
-    st.markdown('<div style="font-size:13px;color:#374f6e;margin-bottom:16px;">Refine today\'s live signals — filter everything the engine scanned by signal category, conviction, direction and technicals. Instant, straight from the live scan (no re-fetch).</div>', unsafe_allow_html=True)
-
-    if not is_premium():
-        render_lock("Refine scanner")
-        st.markdown('</div>', unsafe_allow_html=True); return
-
-    universe = build_scored_universe()
-    rows_all = [r for r in universe if r.get("primary_cat")]
-    if not rows_all:
-        if universe_is_warming():
-            _render_preparing_screen()
-        else:
-            st.info("Market data is still loading — give it a moment, then refresh.")
-        st.markdown('</div>', unsafe_allow_html=True); return
-
-    # ── Market-intelligence summary (the old BI value, folded in) ──
-    n_total = len(rows_all)
-    n_bear = sum(1 for r in rows_all if r.get("direction") == "bear")
-    n_bull = n_total - n_bear
-    avg_conv = sum(int(r.get("conviction") or 0) for r in rows_all) / n_total
-    up_today = sum(1 for r in rows_all if (r.get("q") or {}).get("pct", 0) > 0)
-    breadth = up_today / n_total * 100
-    cat_counts = Counter(r.get("primary_cat") for r in rows_all)
-    present_cats = [c for c, _ in cat_counts.most_common()]
-
-    bcol = GREEN if breadth >= 55 else RED if breadth <= 45 else "#94a3b8"
-    mi = [("STOCKS SCANNED", f"{n_total:,}", "live, fully scored", "#e2e8f0"),
-          ("LONG SETUPS", f"{n_bull:,}", f"{n_bear:,} short setups", "#34d399"),
-          ("AVG CONVICTION", f"{avg_conv:.0f}", "across all signals", "#a5b4fc"),
-          ("MARKET BREADTH", f"{breadth:.0f}%", "advancing today", bcol)]
-    mi_html = "".join(
-        f'<div style="flex:1;min-width:118px;background:#080b14;border:1px solid {BORDER};border-radius:10px;padding:11px 14px;">'
-        f'<div style="font-size:9.5px;color:#374f6e;letter-spacing:1.4px;font-weight:700;">{lbl}</div>'
-        f'<div style="font-size:18px;font-weight:800;color:{col};margin-top:3px;">{val}</div>'
-        f'<div style="font-size:10px;color:#4a5e7a;margin-top:1px;">{sub}</div></div>'
-        for lbl, val, sub, col in mi)
-    st.markdown(f'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px;">{mi_html}</div>', unsafe_allow_html=True)
-
-    # category distribution strip (top primary categories right now)
-    if cat_counts:
-        chips = "".join(
-            f'<span style="display:inline-flex;align-items:center;gap:5px;background:#0d1525;border:1px solid {BORDER};'
-            f'border-radius:20px;padding:4px 11px;font-size:11px;color:#a8bdd4;">'
-            f'{cat_icon(c, 13)}<span>{_clean_name(c)}</span>'
-            f'<b style="color:#6b7a93;">{n}</b></span>'
-            for c, n in cat_counts.most_common(8))
-        st.markdown(f'<div style="display:flex;gap:7px;flex-wrap:wrap;margin:8px 0 16px;">{chips}</div>', unsafe_allow_html=True)
-
-    # ── Preset combos (signal-driven; one click loads a filter set) ──
-    PRESETS = {
-        "\U0001F680 High-Conviction Longs": {"dir": "bull", "min_conv": 70},
-        "\U0001F43B Short Setups":          {"dir": "bear", "min_conv": 50},
-        "\U0001F50A Volume Breakouts":      {"dir": "bull", "req_vol": True, "req_above20": True, "min_conv": 55},
-        "\U0001F4C9 Oversold (RSI<35)":     {"max_rsi": 35},
-        "\U0001F3DB️ Insider Buying":   {"req_insider": True},
-        "\U0001FA73 Short-Squeeze Fuel":    {"dir": "bull", "min_dtc": 5.0},
-    }
-    st.markdown('<div style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:8px;">⚡ QUICK PRESETS</div>', unsafe_allow_html=True)
-    pcols = st.columns(3, gap="small")
-    for i, (pn, pd_) in enumerate(PRESETS.items()):
-        with pcols[i % 3]:
-            if st.button(pn, key=f"scr_preset_{i}", use_container_width=True):
-                st.session_state["_scr_loaded"] = pd_
-                st.session_state["_scr_loaded_name"] = pn
-                st.rerun()
-
-    # ── Saved scans ──
-    if is_authed() and "saved_screeners" not in st.session_state:
-        uemail = st.session_state.user.get("email", "")
-        st.session_state.saved_screeners = st.session_state.users_db.get(uemail, {}).get("saved_screeners", [])
-    saved_screeners = st.session_state.get("saved_screeners", [])
-    if saved_screeners:
-        st.markdown('<div style="font-size:13px;font-weight:700;color:#94a3b8;margin:14px 0 8px;">\U0001F4BE YOUR SAVED SCANS</div>', unsafe_allow_html=True)
-        for si, scr in enumerate(saved_screeners):
-            sc1, sc2 = st.columns([5, 1])
-            with sc1:
-                if st.button(f"\U0001F4C2 {scr.get('name', 'Untitled')}", key=f"scr_load_{si}", use_container_width=True):
-                    st.session_state["_scr_loaded"] = scr
-                    st.session_state["_scr_loaded_name"] = scr.get("name", "Untitled")
-                    st.rerun()
-            with sc2:
-                if st.button("\U0001F5D1", key=f"scr_del_{si}", use_container_width=True, help="Delete"):
-                    saved_screeners.pop(si)
-                    st.session_state.saved_screeners = saved_screeners
-                    if is_authed():
-                        ue = st.session_state.user["email"]
-                        if ue in st.session_state.users_db:
-                            st.session_state.users_db[ue]["saved_screeners"] = saved_screeners
-                            save_user_to_file(ue, st.session_state.users_db[ue])
-                    st.rerun()
-
-    # ── Filter state: defaults + apply any just-loaded preset/scan ──
-    DEFAULTS = {"scr_dir": "All", "scr_minconv": 0, "scr_minrsi": 0, "scr_maxrsi": 100,
-                "scr_vol": False, "scr_above": False, "scr_macd": False, "scr_insider": False,
-                "scr_8k": False, "scr_dtc": 0.0, "scr_price": (0, 1000), "scr_cats": []}
-    for k, v in DEFAULTS.items():
-        st.session_state.setdefault(k, v)
-    loaded = st.session_state.pop("_scr_loaded", None)
-    if loaded is not None:
-        st.session_state["scr_dir"] = {"all": "All", "bull": "Long", "bear": "Short"}.get(loaded.get("dir", "all"), "All")
-        st.session_state["scr_minconv"] = int(loaded.get("min_conv", 0))
-        st.session_state["scr_minrsi"] = int(loaded.get("min_rsi", 0))
-        st.session_state["scr_maxrsi"] = int(loaded.get("max_rsi", 100))
-        st.session_state["scr_vol"] = bool(loaded.get("req_vol", False))
-        st.session_state["scr_above"] = bool(loaded.get("req_above20", False))
-        st.session_state["scr_macd"] = bool(loaded.get("req_macd", False))
-        st.session_state["scr_insider"] = bool(loaded.get("req_insider", False))
-        st.session_state["scr_8k"] = bool(loaded.get("req_8k", False))
-        st.session_state["scr_dtc"] = float(loaded.get("min_dtc", 0.0))
-        st.session_state["scr_price"] = (int(loaded.get("min_price", 0)), int(loaded.get("max_price", 1000)))
-        st.session_state["scr_cats"] = [c for c in loaded.get("cats", []) if c in present_cats]
-    # keep multiselect default valid even as the universe shifts
-    st.session_state["scr_cats"] = [c for c in st.session_state.get("scr_cats", []) if c in present_cats]
-
-    ln = st.session_state.get("_scr_loaded_name", "")
-    if ln:
-        st.markdown(f'<div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:8px 14px;margin:12px 0 2px;font-size:12px;color:#a5b4fc;">\U0001F4CC Loaded: <strong>{ln}</strong></div>', unsafe_allow_html=True)
-
-    with st.expander("⚙️ Scanner Filters", expanded=True):
-        f1, f2, f3 = st.columns(3)
-        with f1:
-            dir_opt = st.radio("Direction", ["All", "Long", "Short"], key="scr_dir", horizontal=True)
-            min_conv = st.slider("Min conviction", 0, 100, key="scr_minconv")
-            min_rsi = st.slider("Min RSI", 0, 100, key="scr_minrsi")
-            max_rsi = st.slider("Max RSI", 0, 100, key="scr_maxrsi")
-        with f2:
-            req_vol = st.checkbox("Volume spike >1.5×", key="scr_vol")
-            req_above = st.checkbox("Above 20-day MA", key="scr_above")
-            req_macd = st.checkbox("MACD bullish", key="scr_macd")
-            req_insider = st.checkbox("Insider buying", key="scr_insider")
-            req_8k = st.checkbox("Fresh 8-K filing", key="scr_8k")
-        with f3:
-            min_dtc = st.slider("Min days-to-cover", 0.0, 20.0, key="scr_dtc", step=0.5,
-                                help="Short interest / avg volume — squeeze fuel. Available where FINRA short data loaded.")
-            price_rng = st.slider("Price range ($)", 0, 1000, key="scr_price")
-            sel_cats = st.multiselect("Signal categories", present_cats, key="scr_cats",
-                                      format_func=_clean_name)
-
-    # ── Filter the warm universe in-memory (instant) ──
-    def _passes(r):
-        f = r.get("factors") or {}; q = r.get("q") or {}; info = r.get("info") or {}
-        d = r.get("direction", "bull")
-        if dir_opt == "Long" and d != "bull": return False
-        if dir_opt == "Short" and d != "bear": return False
-        if int(r.get("conviction") or 0) < min_conv: return False
-        rsi = f.get("rsi")
-        if rsi is not None and (rsi < min_rsi or rsi > max_rsi): return False
-        if req_vol and (f.get("vol_ratio", 0) or 0) < 1.5: return False
-        if req_above and not f.get("above_ma20"): return False
-        if req_macd and (f.get("macd_state", 0) or 0) < 2: return False
-        if req_insider and not ((info.get("insider_buys", 0) or 0) > 0): return False
-        if req_8k and not info.get("has_8k"): return False
-        if (info.get("dtc", 0) or 0) < min_dtc: return False
-        px = q.get("price", 0) or 0
-        if px < price_rng[0] or px > price_rng[1]: return False
-        if sel_cats and r.get("primary_cat") not in sel_cats: return False
-        return True
-
-    matched = [r for r in rows_all if _passes(r)]
-    matched.sort(key=lambda r: int(r.get("conviction") or 0), reverse=True)
-
-    # ── Save the current filter set ──
-    sn, sb = st.columns([3, 1])
-    with sn:
-        scr_name = st.text_input("Name this scan", placeholder="My short-squeeze scan", key="scr_name")
-    with sb:
-        st.markdown('<div style="height:28px;"></div>', unsafe_allow_html=True)
-        if st.button("\U0001F4BE Save Scan", key="scr_save", use_container_width=True):
-            if not scr_name:
-                st.warning("Name the scan first.")
-            else:
-                new_scr = {"name": scr_name,
-                           "dir": {"All": "all", "Long": "bull", "Short": "bear"}[dir_opt],
-                           "min_conv": min_conv, "min_rsi": min_rsi, "max_rsi": max_rsi,
-                           "req_vol": req_vol, "req_above20": req_above, "req_macd": req_macd,
-                           "req_insider": req_insider, "req_8k": req_8k, "min_dtc": min_dtc,
-                           "min_price": price_rng[0], "max_price": price_rng[1], "cats": sel_cats,
-                           "created": datetime.now().strftime("%Y-%m-%d")}
-                saved_screeners = [s for s in saved_screeners if s.get("name") != scr_name]
-                saved_screeners.append(new_scr)
-                st.session_state.saved_screeners = saved_screeners
-                if is_authed():
-                    ue = st.session_state.user["email"]
-                    if ue in st.session_state.users_db:
-                        st.session_state.users_db[ue]["saved_screeners"] = saved_screeners
-                        save_user_to_file(ue, st.session_state.users_db[ue])
-                st.toast(f"Saved: {scr_name}", icon="✅")
-
-    # ── Results ──
-    st.markdown(f'<div style="display:flex;align-items:baseline;gap:10px;margin:18px 0 10px;">'
-                f'<span style="font-size:16px;font-weight:800;color:#e2e8f0;">{len(matched)} match{"es" if len(matched) != 1 else ""}</span>'
-                f'<span style="font-size:12px;color:#374f6e;">ranked by conviction · click any card for the full breakdown</span></div>',
-                unsafe_allow_html=True)
-    if not matched:
-        st.info("No matches — relax a filter or clear the category selection.")
-    else:
-        scr_rows = [{"Ticker": r["t"],
-                     "Price": round((r.get("q") or {}).get("price", 0) or 0, 2),
-                     "Category": _clean_name(r.get("primary_cat", "")),
-                     "Direction": "Short" if r.get("direction") == "bear" else "Long",
-                     "Conviction": int(r.get("conviction") or 0),
-                     "RSI": round((r.get("factors") or {}).get("rsi", 0) or 0, 1),
-                     "Why": r.get("why", "")} for r in matched]
-        ex1, _ = st.columns([1, 3])
-        with ex1:
-            export_button(scr_rows, "marketsignalpro_scan.xlsx", "\U0001F4E5 Export", "scr_export")
-        _render_conviction_grid(matched[:30], "scanres")
-        if len(matched) > 30:
-            st.caption(f"Showing the top 30 of {len(matched)} matches by conviction. Tighten filters to narrow.")
-
-    st.markdown('</div>', unsafe_allow_html=True)
+# REMOVED: page_screener() ("Refine"). It filtered the CURRENT scanned universe by
+# category, conviction, direction and technicals — which is what the Daily Brief's own
+# filters now do, on the feed you're already looking at. A separate tab for narrowing
+# the same data was a surface users had to remember; the /?page=screener and
+# /?page=bi_dashboard routes now land on the Brief so old links keep working.
 
 
-
-# ─────────────────────────────────────────────────────────────
-# PAGE: PRICING
-# ─────────────────────────────────────────────────────────────
-def page_pricing():
-    render_topbar("pricing")
-    back_button("pr_back")
-
-    # ── Embedded Stripe checkout (show when session created) ──
-    if st.session_state.get("_stripe_embed"):
-        embed = st.session_state["_stripe_embed"]
-        plan_name = "Premium Monthly ($19/mo)" if embed["plan"]=="premium" else "Annual Plan ($149/yr)"
-        render_topbar("pricing")
-        st.markdown(f"""
-        <div style="text-align:center;padding:32px 0 20px;">
-            <div style="font-size:11px;font-weight:700;color:{BLUE};letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;">Secure Checkout</div>
-            <div style="font-size:26px;font-weight:800;color:#e2e8f0;margin-bottom:6px;">Complete Your Subscription</div>
-            <div style="font-size:13px;color:#374f6e;">{plan_name} · Powered by Stripe · SSL Encrypted</div>
-        </div>
-        """, unsafe_allow_html=True)
-        # KEPT on components.html (deprecated) deliberately: the Stripe checkout loads
-        # external js.stripe.com and mounts Elements — it needs a real same-origin iframe
-        # (srcdoc inherits the page origin; a data: URL's opaque origin breaks Stripe.js),
-        # and this is the PAYMENT path, which can't be end-to-end verified headlessly.
-        # Migrating it for a soft deprecation isn't worth the revenue risk.
-        components.html(f"""
-        <script src="https://js.stripe.com/v3/"></script>
-        <style>
-        body{{margin:0;padding:20px;background:#07090f;font-family:Inter,sans-serif;}}
-        #checkout-form{{background:#0d1525;border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:24px;max-width:500px;margin:0 auto;}}
-        #submit-btn{{width:100%;padding:14px;background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;margin-top:16px;}}
-        #submit-btn:hover{{background:linear-gradient(135deg,#3730a3,#4f46e5);}}
-        #submit-btn:disabled{{opacity:0.6;cursor:not-allowed;}}
-        #msg{{color:#f87171;font-size:12px;margin-top:8px;text-align:center;}}
-        </style>
-        <div id="checkout-form">
-        <div id="payment-element"></div>
-        <button id="submit-btn" onclick="submitPayment()">🔒 Subscribe Now</button>
-        <div id="msg"></div>
-        </div>
-        <script>
-        var stripe, elements;
-        function _fail(m){{var msg=document.getElementById('msg');if(msg)msg.textContent=m;var b=document.getElementById('submit-btn');if(b){{b.disabled=true;b.textContent='Unavailable — reload';}}}}
-        try{{
-            if(typeof Stripe==='undefined'){{throw new Error('Stripe.js did not load — check your connection or ad-blocker, then reload.');}}
-            stripe=Stripe('{embed["pub_key"]}');
-            elements=stripe.elements({{clientSecret:'{embed["client_secret"]}',appearance:{{theme:'night',variables:{{colorPrimary:'#6366f1',colorBackground:'#0d1525',colorText:'#e2e8f0',colorDanger:'#ef4444',borderRadius:'8px'}}}}}});
-            elements.create('payment').mount('#payment-element');
-        }}catch(e){{_fail('Could not load the payment form: '+(e&&e.message?e.message:e));}}
-        async function submitPayment(){{
-            var btn=document.getElementById('submit-btn');var msg=document.getElementById('msg');
-            if(!stripe||!elements){{_fail('Payment form is not ready — reload the page.');return;}}
-            btn.disabled=true;btn.textContent='Processing...';msg.textContent='';
-            try{{
-                var {{error}}=await stripe.confirmPayment({{elements,confirmParams:{{return_url:'{embed["return_url"]}'}}}});
-                if(error){{msg.textContent=error.message;btn.disabled=false;btn.textContent='🔒 Subscribe Now';}}
-            }}catch(e){{msg.textContent='Payment error: '+(e&&e.message?e.message:e);btn.disabled=false;btn.textContent='🔒 Subscribe Now';}}
-        }}
-        </script>
-        """, height=450, scrolling=False)
-        st.markdown("<br>",unsafe_allow_html=True)
-        if st.button("← Cancel and go back to pricing", key="cancel_embed"):
-            st.session_state.pop("_stripe_embed", None)
-            st.rerun()
-        return
-
-    st.markdown('<div class="page-wrap">' ,unsafe_allow_html=True)
-
-    # ── Header ──
-    st.markdown(f"""
-    <div style="text-align:center;padding:32px 0 28px;">
-        <div style="font-size:11px;font-weight:700;color:{BLUE};letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;">Simple, Transparent Pricing</div>
-        <div style="font-size:34px;font-weight:900;color:#f1f5f9;letter-spacing:-1px;margin-bottom:8px;">Choose Your Plan</div>
-        <div style="font-size:14px;color:#374f6e;">No hidden fees. No API keys. Cancel anytime.</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── Card CSS ──
-    st.markdown(f"""<style>
-    .sw-pc-col {{
-        background:{CARD};border:1px solid rgba(255,255,255,0.1);
-        border-radius:14px;
-        padding:24px 20px;
-        transition:all 0.25s cubic-bezier(0.4,0,0.2,1);
-        display:flex;flex-direction:column;box-sizing:border-box;
-        min-height:560px;
-        margin-bottom:0!important;
-    }}
-    .sw-pc-col:hover{{border-color:rgba(99,102,241,0.35);}}
-    /* In-card CTA (the WHOLE plan card is now a clickable tile) */
-    .sw-pc-fakecta{{margin-top:18px;text-align:center;font-size:14px;font-weight:700;padding:15px 0;
-        border-radius:10px;letter-spacing:.3px;transition:all .2s ease;}}
-    .sw-pc-fakecta-free{{background:rgba(255,255,255,0.05);color:#a8bdd4;border:1px solid rgba(255,255,255,0.1);}}
-    .sw-pc-fakecta-blue{{background:linear-gradient(135deg,#4f46e5,#6366f1 55%,#8b5cf6);color:#fff;box-shadow:0 4px 20px rgba(99,102,241,0.4);}}
-    .sw-pc-fakecta-gold{{background:linear-gradient(135deg,#92400e,#d97706,#f59e0b);color:#1a0800;font-weight:800;box-shadow:0 4px 20px rgba(245,158,11,0.4);}}
-    .ctile:hover .sw-pc-fakecta-free{{background:rgba(99,102,241,0.12);color:#a5b4fc;border-color:rgba(99,102,241,0.3);}}
-    .ctile:hover .sw-pc-fakecta-blue{{background:linear-gradient(135deg,#3730a3,#4f46e5);}}
-    .ctile:hover .sw-pc-fakecta-gold{{filter:brightness(1.08);}}
-    /* NOTE: no persistent transform on the cards — a transform creates a containing
-       block / stacking context that fought the invisible overlay button, so the
-       premium/annual tiles wouldn't click. The "lift" now happens on column-hover. */
-    .sw-pc-sel-blue{{
-        border:2px solid {BLUE}!important;
-        background:linear-gradient(160deg,#04091d,{CARD})!important;
-        box-shadow:0 14px 40px rgba(99,102,241,0.32)!important;
-    }}
-    .sw-pc-sel-gold{{
-        border:2px solid {GOLD}!important;
-        background:linear-gradient(160deg,#160c00,#0f0800,{CARD})!important;
-        box-shadow:0 14px 40px rgba(245,158,11,0.32)!important;
-    }}
-    .sw-pc-badge{{font-size:9px;font-weight:700;padding:3px 10px;border-radius:20px;display:inline-block;letter-spacing:1px;margin-bottom:10px;}}
-    .sw-pc-feats{{font-size:12px;color:#374f6e;line-height:2.3;flex:1;}}
-    .sw-pc-dim{{color:#1e3050;}}
-
-    /* CTA button integrated into card bottom — looks like part of the card */
-    .sw-pc-cta,.sw-pc-cta-active,.sw-pc-cta-gold-active{{margin-top:-2px!important;margin-bottom:0!important;}}
-    .sw-pc-cta .stButton>button,
-    .sw-pc-cta-active .stButton>button,
-    .sw-pc-cta-gold-active .stButton>button{{
-        border-radius:0 0 14px 14px!important;
-        margin-top:0!important;
-        font-size:14px!important;font-weight:700!important;
-        padding:16px 0!important;
-        min-height:56px!important;
-        letter-spacing:0.3px!important;
-        border-top:none!important;
-        border-left:1px solid rgba(255,255,255,0.1)!important;
-        border-right:1px solid rgba(255,255,255,0.1)!important;
-        border-bottom:1px solid rgba(255,255,255,0.1)!important;
-        transition:all 0.2s ease!important;
-    }}
-    /* Free plan button - subtle */
-    .sw-pc-cta .stButton>button{{
-        background:rgba(255,255,255,0.04)!important;
-        color:#a8bdd4!important;
-    }}
-    .sw-pc-cta .stButton>button:hover{{
-        background:rgba(99,102,241,0.1)!important;
-        color:#a5b4fc!important;
-        border-color:rgba(99,102,241,0.3)!important;
-    }}
-    /* Premium button - bold blue */
-    .sw-pc-cta-active .stButton>button{{
-        background:linear-gradient(135deg,#4f46e5,#6366f1)!important;
-        color:#fff!important;
-        border-color:{BLUE}!important;
-        box-shadow:0 4px 20px rgba(99,102,241,0.4)!important;
-    }}
-    .sw-pc-cta-active .stButton>button:hover{{
-        background:linear-gradient(135deg,#3730a3,#4f46e5)!important;
-    }}
-    /* Annual button - gold */
-    .sw-pc-cta-gold-active .stButton>button{{
-        background:linear-gradient(135deg,#92400e,#d97706,#f59e0b)!important;
-        color:#1a0800!important;
-        border-color:{GOLD}!important;
-        box-shadow:0 4px 20px rgba(245,158,11,0.4)!important;
-        font-weight:800!important;
-    }}
-    [data-testid="stHorizontalBlock"]:has(.sw-pc-col){{align-items:stretch!important;}}
-    /* hover-lift the whole tile (column hover, so it works even though .ctile is
-       pointer-transparent) + brighten the border on all three cards incl. selected */
-    [data-testid="stColumn"]:has(.sw-pc-col){{transition:transform .2s cubic-bezier(.4,0,.2,1);}}
-    [data-testid="stColumn"]:has(.sw-pc-col):hover{{transform:translateY(-5px);z-index:3;}}
-    [data-testid="stColumn"]:has(.sw-pc-col):hover .sw-pc-sel-blue{{border-color:#818cf8!important;box-shadow:0 20px 52px rgba(99,102,241,0.5)!important;}}
-    [data-testid="stColumn"]:has(.sw-pc-col):hover .sw-pc-sel-gold{{border-color:#fbbf24!important;box-shadow:0 20px 52px rgba(245,158,11,0.5)!important;}}
-
-    /* ── Real, visible plan CTA buttons (RELIABLE click — no overlay). Each card is
-       followed by an invisible marker div, then the real st.button; we style that
-       button via the proven sibling selector .element-container:has(marker)+next. The
-       card's own bottom corners are squared so the button completes the card. ── */
-    .pc-cta-mark{{display:none;}}
-    .sw-pc-col{{border-radius:14px 14px 0 0!important;}}
-    .element-container:has(.pc-cta-free)+.element-container .stButton>button,
-    .element-container:has(.pc-cta-blue)+.element-container .stButton>button,
-    .element-container:has(.pc-cta-gold)+.element-container .stButton>button{{
-        width:100%!important;margin-top:0!important;border-radius:0 0 14px 14px!important;
-        font-size:14px!important;font-weight:700!important;padding:16px 0!important;
-        min-height:54px!important;letter-spacing:.3px!important;transition:all .18s ease!important;
-        border-top:none!important;}}
-    .element-container:has(.pc-cta-free)+.element-container .stButton>button{{
-        background:rgba(255,255,255,0.05)!important;color:#a8bdd4!important;
-        border:1px solid rgba(255,255,255,0.12)!important;border-top:none!important;}}
-    .element-container:has(.pc-cta-free)+.element-container .stButton>button:hover{{
-        background:rgba(99,102,241,0.12)!important;color:#a5b4fc!important;border-color:rgba(99,102,241,0.35)!important;}}
-    .element-container:has(.pc-cta-blue)+.element-container .stButton>button{{
-        background:linear-gradient(135deg,#4f46e5,#6366f1 55%,#8b5cf6)!important;color:#fff!important;
-        border:2px solid {BLUE}!important;border-top:none!important;box-shadow:0 4px 18px rgba(99,102,241,0.4)!important;}}
-    .element-container:has(.pc-cta-blue)+.element-container .stButton>button:hover{{
-        background:linear-gradient(135deg,#3730a3,#4f46e5)!important;}}
-    .element-container:has(.pc-cta-gold)+.element-container .stButton>button{{
-        background:linear-gradient(135deg,#92400e,#d97706,#f59e0b)!important;color:#1a0800!important;font-weight:800!important;
-        border:2px solid {GOLD}!important;border-top:none!important;box-shadow:0 4px 18px rgba(245,158,11,0.4)!important;}}
-    .element-container:has(.pc-cta-gold)+.element-container .stButton>button:hover{{
-        filter:brightness(1.08)!important;}}
-
-    /* ── MOBILE PRICING ── */
-    @media (max-width: 992px) {{
-        [data-testid="stHorizontalBlock"]:has(.sw-pc-col) {{
-            flex-direction: column !important;
-            gap: 28px !important;
-        }}
-        [data-testid="stHorizontalBlock"]:has(.sw-pc-col) [data-testid="column"] {{
-            width: 100% !important;
-            min-width: 100% !important;
-        }}
-        .sw-pc-col {{
-            min-height: auto !important;
-            transform: none !important;
-            margin-bottom: 0 !important;
-        }}
-        .sw-pc-sel-blue, .sw-pc-sel-gold {{
-            transform: none !important;
-        }}
-        .sw-pc-cta .stButton>button,
-        .sw-pc-cta-active .stButton>button,
-        .sw-pc-cta-gold-active .stButton>button {{
-            min-height: 60px !important;
-            font-size: 15px !important;
-        }}
-    }}
-    </style>""", unsafe_allow_html=True)
-
-    if "sel_plan" not in st.session_state:
-        st.session_state.sel_plan = "premium"
-    sel = st.session_state.sel_plan
-
-    def card_badge(plan):
-        if plan == "premium":
-            return f'<span class="sw-pc-badge" style="background:rgba(99,102,241,0.15);color:{BLUE};">⭐ MOST POPULAR</span>'
-        if plan == "annual":
-            return f'<span class="sw-pc-badge" style="background:linear-gradient(90deg,#92400e,#d97706);color:#fff8e1;">👑 BEST VALUE — SAVE 43%</span>'
-        return f'<span class="sw-pc-badge" style="background:rgba(255,255,255,0.06);color:#4a5e7a;">Free Plan</span>'
-
-    c1, c2, c3 = st.columns(3, gap="small")
-
-    # ── FREE ── (the whole card is the click target)
-    with c1:
-        st.markdown(f"""<div class="sw-pc-col">
-            {card_badge("free")}
-            <div style="font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:2px;">Free</div>
-            <div style="font-family:'JetBrains Mono',monospace;font-size:44px;font-weight:800;color:#e2e8f0;line-height:1.1;margin-bottom:2px;">$0</div>
-            <div style="font-size:11px;color:#374f6e;margin-bottom:14px;">forever · no card needed</div>
-            <hr style="border-color:{BORDER};margin:10px 0 14px;">
-            <div class="sw-pc-feats">
-            ✅&nbsp; Market overview &amp; indexes<br>
-            ✅&nbsp; RSI &amp; MACD signals<br>
-            ✅&nbsp; Plain-English insights<br>
-            ✅&nbsp; 8 composite categories<br>
-            ✅&nbsp; Watchlist (10 stocks)<br>
-            ✅&nbsp; BUY / AVOID signals<br>
-            <span class="sw-pc-dim">❌&nbsp; 15 premium categories<br>
-            ❌&nbsp; Short squeeze scanner<br>
-            ❌&nbsp; Advanced screener<br>
-            ❌&nbsp; BI analytics &amp; score details</span>
-            </div>
-        </div>""", unsafe_allow_html=True)
-        st.markdown('<div class="pc-cta-mark pc-cta-free"></div>', unsafe_allow_html=True)
-        if st.button("Get Started Free →", key="pc_free", use_container_width=True):
-            nav("signup" if not is_authed() else "dashboard")
-
-    # ── PREMIUM ──
-    with c2:
-        st.markdown(f"""<div class="sw-pc-col sw-pc-sel-blue">
-            {card_badge("premium")}
-            <div style="font-size:14px;font-weight:600;color:#e2e8f0;margin-bottom:2px;">Premium Monthly</div>
-            <div style="font-family:'JetBrains Mono',monospace;font-size:44px;font-weight:800;color:#e2e8f0;line-height:1.1;margin-bottom:2px;">$19<span style="font-size:16px;font-weight:600;color:#374f6e;"> /mo</span></div>
-            <div style="font-size:11px;color:#374f6e;margin-bottom:4px;">cancel anytime</div>
-            <div style="font-size:11px;font-weight:700;color:{GOLD};margin-bottom:10px;">🔒 Founding price — locked in for life</div>
-            <hr style="border-color:{BORDER};margin:10px 0 14px;">
-            <div class="sw-pc-feats">
-            ✅&nbsp; Everything in Free<br>
-            ✅&nbsp; All 23 composite categories<br>
-            ✅&nbsp; Insider Cluster &amp; Short Squeeze<br>
-            ✅&nbsp; Advanced screener<br>
-            ✅&nbsp; Full BI analytics &amp; charts<br>
-            ✅&nbsp; Conviction score breakdowns<br>
-            ✅&nbsp; Volume surge detection<br>
-            ✅&nbsp; Unlimited watchlist<br>
-            ✅&nbsp; Watchlist score analytics<br>
-            ✅&nbsp; Saved screener configs
-            </div>
-        </div>""", unsafe_allow_html=True)
-        st.markdown('<div class="pc-cta-mark pc-cta-blue"></div>', unsafe_allow_html=True)
-        if st.button("Get Premium — $19/mo", key="pc_premium", use_container_width=True):
-            if not is_authed():
-                st.session_state["_pending_checkout"]="premium"
-                nav("signup")
-            else:
-                _do_checkout("premium")
-
-    # ── ANNUAL ──
-    with c3:
-        st.markdown(f"""<div class="sw-pc-col sw-pc-sel-gold">
-            {card_badge("annual")}
-            <div style="font-size:14px;font-weight:600;color:#e2e8f0;margin-bottom:2px;">Annual Plan</div>
-            <div style="font-family:'JetBrains Mono',monospace;font-size:44px;font-weight:800;color:{GOLD};line-height:1.1;margin-bottom:2px;">$149</div>
-            <div style="font-size:11px;color:#374f6e;margin-bottom:14px;">per year · $12.42/mo · save $79 vs monthly</div>
-            <hr style="border-color:rgba(245,158,11,0.15);margin:10px 0 14px;">
-            <div class="sw-pc-feats">
-            ✅&nbsp; Everything in Premium<br>
-            ✅&nbsp; Priority support<br>
-            ✅&nbsp; Early feature access<br>
-            ✅&nbsp; Export to CSV<br>
-            ✅&nbsp; Custom alert schedules<br>
-            <div style="margin-top:10px;font-size:10px;font-weight:700;letter-spacing:0.4px;color:#374f6e;text-transform:uppercase;">On the roadmap</div>
-            <span class="sw-pc-dim">🔜&nbsp; API access<br>
-            🔜&nbsp; Backtesting<br>
-            🔜&nbsp; Portfolio tracker</span>
-            </div>
-        </div>""", unsafe_allow_html=True)
-        st.markdown('<div class="pc-cta-mark pc-cta-gold"></div>', unsafe_allow_html=True)
-        if st.button("Get Annual — $149/yr", key="pc_annual", use_container_width=True):
-            if not is_authed():
-                st.session_state["_pending_checkout"]="annual"
-                nav("signup")
-            else:
-                _do_checkout("annual")
-
-    # ── Stripe status bar ──
-    if stripe_configured():
-        st.markdown("""<div style="text-align:center;margin-top:16px;">
-            <span style="font-size:11px;color:#374f6e;">🔒 Secure payments by </span>
-            <span style="font-size:12px;font-weight:800;color:#6775ba;letter-spacing:-0.5px;">stripe</span>
-            <span style="font-size:11px;color:#374f6e;"> · SSL encrypted · Cancel anytime · 30-day refund policy</span>
-        </div>""", unsafe_allow_html=True)
-    else:
-        st.markdown(f"""<div style="background:#0e1421;border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:12px 16px;margin-top:12px;font-size:12px;color:#374f6e;">
-        ⚙️ <strong style="color:{GOLD};">Payment processing not yet configured.</strong>
-        Add <code>STRIPE_SECRET_KEY</code>, <code>STRIPE_PRICE_MONTHLY</code>, <code>STRIPE_PRICE_ANNUAL</code>, <code>APP_URL</code> to Streamlit Secrets, then reboot.
-        In the meantime email <span style="color:#a5b4fc;font-weight:600;">support@scanviction.com</span> to upgrade manually.
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown('<div class="disc" style="margin-top:14px;">⚠️ Educational platform only. Not financial advice. Trading involves risk.</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    render_footer()
-
-
-def _do_checkout(plan):
-    """Open the IN-PAGE Stripe checkout (embedded Elements card form). Falls back to a
-    hosted-redirect if the embedded form can't be built, and shows a clear message if
-    Stripe isn't configured — it never silently does nothing."""
-    email = st.session_state.user["email"]
-    # 1) Preferred: embedded in-page Elements form
-    with st.spinner("Setting up secure checkout…"):
-        pub, secret, err = create_embedded_subscription(plan, email)
-    if pub and secret:
-        st.session_state["_stripe_embed"] = {
-            "plan": plan, "pub_key": pub, "client_secret": secret,
-            "return_url": f"{_get_app_url()}/?payment=success&plan={plan}",
-        }
-        st.rerun(); return
-    # 2) Fallback: hosted Stripe Checkout redirect (if at least the secret key is set)
-    with st.spinner("Preparing checkout…"):
-        url, rerr = create_checkout_session(plan, email)
-    if url:
-        st.session_state["_redirect_url"] = url
-        st.rerun(); return
-    # 3) Stripe not set up — tell the user exactly what's missing (no silent no-op)
-    st.error(f"Checkout is not available yet: {err or rerr}")
-    st.info("To accept payments, add **STRIPE_SECRET_KEY**, **STRIPE_PUBLISHABLE_KEY**, "
-            "**STRIPE_PRICE_MONTHLY** and **STRIPE_PRICE_ANNUAL** to `.streamlit/secrets.toml`, "
-            "then reboot. The in-page card form appears automatically once those are set.")
-
-
-# ─────────────────────────────────────────────────────────────
-# PAGE: SETTINGS
-# ─────────────────────────────────────────────────────────────
 def page_settings():
     render_topbar("settings")
     st.markdown('<div class="page-wrap">' ,unsafe_allow_html=True)
@@ -12337,7 +11807,7 @@ def page_settings():
         </div>""", unsafe_allow_html=True)
 
         if not is_premium():
-            st.markdown('<div style="font-size:12px;color:#374f6e;margin-bottom:10px;">Upgrade to unlock all 23 composite categories, the Refine scanner, signal charts, and more.</div>',unsafe_allow_html=True)
+            st.markdown('<div style="font-size:12px;color:#374f6e;margin-bottom:10px;">Upgrade to unlock all 23 composite categories, advanced Brief filters, signal charts, and more.</div>',unsafe_allow_html=True)
             uc1,uc2=st.columns(2,gap="small")
             with uc1:
                 if gold_btn("👑 Upgrade to Premium — $19/mo","set_prem_mo"):
@@ -13197,7 +12667,7 @@ SIGNAL CATEGORIES (23 total; each stock is assigned ONE best-fit category, no ov
 
 KEY FEATURES
 - Discover: Top Signals home + a themed category browser.
-- Refine scanner: filters the live scanned universe by signal, conviction, direction (long/short), RSI, volume, MACD, insider buying, fresh 8-K, days-to-cover, price and category. (This replaced the old separate Screener + BI pages.)
+- Daily Brief filters: the Brief feed can be narrowed by event type, signal category, minimum score, direction (long/short) and minimum category win rate. (These absorbed the old separate Refine / Screener / BI pages.)
 - Stock detail page: a "Signal on the Chart" view that draws the detected pattern (breakout line, bull flag, squeeze bands, breakdown, reversal) right on the candles, plus a conviction-score breakdown, recent alerts and fundamentals.
 - Alerts: notifies you when a stock newly enters a category, when insiders buy, when an 8-K drops, or on short-interest surges — in-app feed plus optional email/Telegram/push.
 - Watchlist and a signal track-record (outcome tracking).
@@ -13206,7 +12676,7 @@ DATA SOURCES: Polygon.io (whole-market price/volume), SEC EDGAR (insider Form 4 
 
 PLANS
 - Free: market overview, 7 free categories, RSI/MACD signals, watchlist (10 stocks), BUY/AVOID.
-- Premium $19/mo: all 23 categories incl. bear/short, the Refine scanner, squeeze scanner, conviction breakdowns, signal charts, unlimited watchlist, saved scans.
+- Premium $19/mo: all 23 categories incl. bear/short, advanced Brief filters (direction + category win rate), squeeze scanner, conviction breakdowns, signal charts, unlimited watchlist.
 - Annual $149/yr: everything in Premium + priority support, CSV export, early access.
 - Billing is via Stripe (in-page checkout). Cancel anytime in Settings → Subscription.
 
@@ -13330,7 +12800,7 @@ if st.session_state.get("_redirect_url"):
         </div>
         <div style="background:#080b14;border:1px solid {BORDER};border-radius:10px;padding:16px 18px;margin-bottom:16px;">
             <div style="font-size:12px;font-weight:700;color:#e2e8f0;margin-bottom:8px;">What you get immediately:</div>
-            <div style="font-size:13px;color:#374f6e;line-height:2.2;">✅&nbsp; All 23 composite signal categories (incl. bear/short)<br>✅&nbsp; Refine scanner + short-squeeze scanner<br>✅&nbsp; Signal charts &amp; conviction breakdowns<br>✅&nbsp; Plain-English insights<br>✅&nbsp; Unlimited watchlist &amp; price alerts</div>
+            <div style="font-size:13px;color:#374f6e;line-height:2.2;">✅&nbsp; All 23 composite signal categories (incl. bear/short)<br>✅&nbsp; Advanced Brief filters + short-squeeze scanner<br>✅&nbsp; Signal charts &amp; conviction breakdowns<br>✅&nbsp; Plain-English insights<br>✅&nbsp; Unlimited watchlist &amp; price alerts</div>
         </div>
         """, unsafe_allow_html=True)
         # Native link button navigates reliably. A raw <a target="_top"> inside st.markdown renders
@@ -13350,7 +12820,7 @@ if st.session_state.get("_redirect_url"):
         </div>
         <div style="background:#0d1525;border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:18px;margin-top:12px;">
             <div style="font-size:12px;font-weight:700;color:{GREEN};margin-bottom:8px;">After Payment ✓</div>
-            <div style="font-size:12px;color:#374f6e;line-height:2.2;">1. Account upgrades instantly<br>2. All premium categories unlock<br>3. Set up watchlist &amp; alerts<br>4. Explore the Refine scanner<br>5. Configure email digests</div>
+            <div style="font-size:12px;color:#374f6e;line-height:2.2;">1. Account upgrades instantly<br>2. All premium categories unlock<br>3. Set up watchlist &amp; alerts<br>4. Filter your Daily Brief<br>5. Configure email digests</div>
         </div>
         <div style="margin-top:12px;text-align:center;font-size:12px;color:#2a3a52;">Questions? <span style="color:#a5b4fc;font-weight:600;">support@scanviction.com</span></div>
         """, unsafe_allow_html=True)
@@ -13391,7 +12861,7 @@ if st.session_state.get("_pay_success"):
         </div>
         <div style="font-size:14px;color:#374f6e;margin-bottom:20px;line-height:1.7;">
             Your account has been upgraded. You now have access to all {plan_name} features.<br>
-            Start exploring all 23 composite categories, the short-squeeze scanner, and the full Refine scanner.
+            Start exploring all 23 composite categories, the short-squeeze scanner, and the full Brief filters.
         </div>
         <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
             <span style="background:rgba(34,197,94,0.1);color:#4ade80;font-size:12px;font-weight:700;
@@ -13404,7 +12874,7 @@ if st.session_state.get("_pay_success"):
             </span>
             <span style="background:rgba(34,197,94,0.1);color:#4ade80;font-size:12px;font-weight:700;
                          padding:6px 16px;border-radius:20px;border:1px solid rgba(34,197,94,0.3);">
-                ✅ Refine scanner enabled
+                ✅ Advanced Brief filters enabled
             </span>
         </div>
     </div>
@@ -13415,8 +12885,8 @@ if st.session_state.get("_pay_success"):
         if st.button("🎯 Explore Premium Categories", key="ps_disc", type="primary", use_container_width=True):
             nav("discover")
     with _qa2:
-        if st.button("🔍 Open Refine scanner", key="ps_bi", use_container_width=True):
-            nav("screener")
+        if st.button("🔔 Open your Daily Brief", key="ps_bi", use_container_width=True):
+            nav("signals")
     with _qa3:
         if st.button("🔔 Set Up Alerts", key="ps_alerts", use_container_width=True):
             nav("settings")
@@ -13499,11 +12969,7 @@ if _need is not None and not can_access(page):
             nav("dashboard")
         st.markdown('</div>', unsafe_allow_html=True)
     else:  # premium gate
-        _titles = {"bi_dashboard": ("🔍 Refine scanner",
-                                    "Filter every scanned stock by signal, conviction, and technicals — with a live market-intelligence summary."),
-                   "screener":     ("🔍 Refine scanner",
-                                    "Filter every scanned stock by signal, conviction, and technicals — instant, from the live scan.")}
-        _t, _d = _titles.get(page, ("⭐ Premium Feature", "Upgrade to unlock this feature."))
+        _t, _d = ("⭐ Premium Feature", "Upgrade to unlock this feature.")
         render_topbar(page)
         st.markdown('<div class="page-wrap">', unsafe_allow_html=True)
         st.markdown(f'<div style="font-size:22px;font-weight:800;color:#e2e8f0;margin-bottom:8px;">{_t}</div>', unsafe_allow_html=True)
@@ -13525,8 +12991,10 @@ else:
     elif page=="dashboard":    page_dashboard()
     elif page=="discover":     page_discover()
     elif page=="watchlist":    page_watchlist()
-    elif page=="screener":     page_screener()
-    elif page=="bi_dashboard": page_screener()   # BI folded into the Refine scanner
+    # Refine (and the BI dashboard it had already absorbed) are retired — their filtering
+    # now lives in the Brief. Both keys still route so existing bookmarks and saved links
+    # land on the surface that took over, rather than on a 404.
+    elif page in ("screener", "bi_dashboard"): page_signals()
     elif page=="signals":      page_signals()
     elif page=="performance":  page_performance()
     elif page=="signal_track": page_signal_track()
