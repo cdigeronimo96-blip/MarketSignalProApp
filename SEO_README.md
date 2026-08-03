@@ -1,10 +1,62 @@
-# SEO static site — the marketing moat
+# SEO — two separate pieces
 
-Streamlit can't be indexed by Google (one JS-rendered route, no per-page URLs/titles/meta). This
-generates a **separate, static, indexable site** from your live scan — one page per ticker + one per
-signal category + a hub index — that ranks for `[TICKER] stock signals`, `stocks breaking out today`,
-etc., and funnels visitors into the app's free signup. This is exactly how StockAnalysis.com (solo,
-no VC) reached millions of monthly visits.
+1. **`seo_shell.py`** — makes the *live app's* own listing correct (title, description, social
+   preview). Runs at build time. Start here; it's a one-line fix for an embarrassing listing.
+2. **`seo_generate.py`** — the marketing moat: a separate static site with one indexable page
+   per ticker/category. That's the traffic play, described below.
+
+---
+
+## 1. `seo_shell.py` — brand the HTML shell Streamlit serves
+
+**The problem.** Streamlit serves a static `streamlit/static/index.html` for `/`. Stock, it says:
+
+```html
+<title>Streamlit</title>
+<noscript>You need to enable JavaScript to run this app.</noscript>
+```
+
+`st.set_page_config(page_title=...)` and every meta tag the app injects only touch the DOM *after*
+the React bundle boots — long after a crawler has been served that raw HTML. So Google indexed
+scanviction.com as literally **"Streamlit — You need to enable JavaScript to run this app."**
+No amount of in-app code can fix it, because the app hasn't run at the moment that HTML is sent.
+
+**The fix.** `seo_shell.py` rewrites that file on disk: real `<title>`, meta description,
+`rel=canonical`, Open Graph + Twitter card, Organization/WebSite JSON-LD, and a `<noscript>` that
+actually describes the product. It also drops `robots.txt` and `sitemap.xml` into the same
+directory — Streamlit serves that directory at the site root, so they land at `/robots.txt` and
+`/sitemap.xml` (the app's own `./static/` dir does **not** work for this; `enableStaticServing`
+mounts it under `/app/static/`).
+
+```bash
+python seo_shell.py                            # patch (uses $SITE_URL, else https://scanviction.com)
+python seo_shell.py --site-url https://example.com
+python seo_shell.py --check                    # report status, change nothing
+```
+
+- **It must run after every `pip install`** — pip lays down a fresh, unbranded `index.html` on each
+  build. `render.yaml`'s `buildCommand` does this. `app.py` also calls it once per process as a
+  fallback for services created by hand (Render ignores the blueprint's commands for those).
+- Idempotent and upgrade-safe: it re-patches whatever `index.html` is on disk rather than restoring
+  a saved copy, so it can never resurrect stale JS bundle hashes after a Streamlit upgrade.
+- The origin comes from `--site-url` / `$SITE_URL` only, **never `APP_URL`** — that one is the
+  deployment URL (often `*.onrender.com`), and a canonical pointing there tells Google the branded
+  domain is the duplicate.
+
+**After deploying:** Google re-crawls on its own schedule (days to weeks). To speed it up, use
+Search Console → URL Inspection → *Request indexing* on `https://scanviction.com/`, and submit
+`https://scanviction.com/sitemap.xml` under Sitemaps. Verify what the crawler sees with
+`curl -s https://scanviction.com/ | grep -E '<title>|description'`.
+
+---
+
+## 2. SEO static site — the marketing moat
+
+The app is still one JS-rendered route with no per-page URLs, so it can only ever rank for the brand
+itself. This generates a **separate, static, indexable site** from your live scan — one page per
+ticker + one per signal category + a hub index — that ranks for `[TICKER] stock signals`,
+`stocks breaking out today`, etc., and funnels visitors into the app's free signup. This is exactly
+how StockAnalysis.com (solo, no VC) reached millions of monthly visits.
 
 ## How it works
 

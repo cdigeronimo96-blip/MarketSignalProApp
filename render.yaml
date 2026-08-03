@@ -44,7 +44,14 @@ services:
     plan: standard                # ALWAYS-ON, 2GB RAM (~$25/mo) — headroom for the 2,500-ticker
                                   # warm. `starter` (512MB, ~$7) OOMs unless you cut POLY_MAX_UNIVERSE.
                                   # Do NOT use free — it spins down (hibernation).
-    buildCommand: pip install -r requirements.txt
+    # seo_shell.py rebrands the HTML shell Streamlit serves for "/" (title, description,
+    # canonical, OG/Twitter, JSON-LD, a real <noscript>, plus robots.txt + sitemap.xml).
+    # It MUST run after pip install, because pip lays down a fresh, unbranded
+    # streamlit/static/index.html on every build. Without it Google indexes Streamlit's
+    # default shell and the listing reads "Streamlit — You need to enable JavaScript to
+    # run this app." (st.set_page_config can't fix that: it only edits the DOM after the
+    # JS bundle boots, long after the crawler has been served the raw HTML.)
+    buildCommand: pip install -r requirements.txt && python seo_shell.py
     # Render Secret Files can't contain a "/" in the name, so the secrets file is added as a
     # flat `secrets.toml` (mounted at /etc/secrets/secrets.toml). Copy it into .streamlit/ on
     # boot so st.secrets finds it, then launch Streamlit.

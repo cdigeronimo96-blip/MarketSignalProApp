@@ -196,6 +196,24 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ── Crawler-visible branding (belt-and-braces) ────────────────────────────────
+# set_page_config above only renames the tab AFTER the JS bundle boots. The HTML a crawler
+# is served for "/" comes from Streamlit's own static/index.html, which says
+# "<title>Streamlit</title>" and "You need to enable JavaScript to run this app." — and that
+# is exactly what Google indexed us as. seo_shell.py rewrites that file; render.yaml runs it
+# at build time, which is the right place. This call is the fallback for deployments that
+# don't use the blueprint's buildCommand (Render ignores render.yaml for services created by
+# hand — see the warning at the top of that file). cache_resource makes it once per process,
+# not once per script rerun, and the patch itself is idempotent and never raises.
+@st.cache_resource(show_spinner=False)
+def _brand_html_shell():
+    try:
+        import seo_shell
+        return seo_shell.apply(quiet=False)
+    except Exception:
+        return False
+_brand_html_shell()
+
 _BASE_CSS = None
 def _inject_base_css():
     """Inject styles.css (the static global base stylesheet) once. Read is cached.
