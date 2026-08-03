@@ -42,6 +42,10 @@ python seo_shell.py --check                    # report status, change nothing
 - The origin comes from `--site-url` / `$SITE_URL` only, **never `APP_URL`** — that one is the
   deployment URL (often `*.onrender.com`), and a canonical pointing there tells Google the branded
   domain is the duplicate.
+- **Social card:** drop a 1200×630 `static/og-image.png` in the repo and the next build upgrades
+  the preview to a large Twitter/X card automatically. Until then it advertises the square PWA
+  icon as a plain `summary` card — claiming `summary_large_image` for a 192×192 asset makes X and
+  LinkedIn drop the image entirely, so the smaller card is the one that actually renders.
 
 **After deploying:** Google re-crawls on its own schedule (days to weeks). To speed it up, use
 Search Console → URL Inspection → *Request indexing* on `https://scanviction.com/`, and submit

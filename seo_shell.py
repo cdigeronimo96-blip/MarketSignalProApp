@@ -60,6 +60,11 @@ _BLOCK_RE = re.compile(
 
 DEFAULT_SITE_URL = "https://scanviction.com"
 
+# Optional wide social card at ./static/<name> (1200x630 recommended). Present → the shell
+# advertises a large Twitter/X card; absent → it falls back to the square PWA icon and a
+# plain summary card. See _resolve_og_image().
+OG_IMAGE_NAME = "og-image.png"
+
 # Must match st.set_page_config(page_title=...) in app.py. If the crawler title and the
 # rendered title disagree, the tab name changes under the visitor after boot — and a title
 # that doesn't match the page it labels is the definition of a misleading snippet.
@@ -99,10 +104,24 @@ NOSCRIPT_HTML = """<noscript>
     </noscript>"""
 
 
+def _resolve_og_image(site: str) -> tuple[str, str]:
+    """(image_url, twitter_card_type).
+
+    A `summary_large_image` card needs a wide image (~1200x630). All we ship today is the
+    192x192 PWA icon, and claiming a large card for it makes X/LinkedIn drop the image
+    entirely — a square asset renders correctly as a plain `summary` card instead. Drop a
+    real 1200x630 file at static/og-image.png and this upgrades itself on the next build.
+    """
+    app_static = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+    if os.path.exists(os.path.join(app_static, OG_IMAGE_NAME)):
+        return f"{site}/app/static/{OG_IMAGE_NAME}", "summary_large_image"
+    return f"{site}/app/static/icon-192.png", "summary"
+
+
 def _head_block(site_url: str) -> str:
     """The meta/link/JSON-LD block injected before </head>."""
     site = site_url.rstrip("/")
-    og_image = f"{site}/app/static/icon-192.png"
+    og_image, twitter_card = _resolve_og_image(site)
     # Organization + WebSite only. No aggregateRating and no Offer: structured data that
     # asserts ratings or prices we can't evidence is a policy problem, not an SEO win.
     json_ld = (
@@ -129,7 +148,7 @@ def _head_block(site_url: str) -> str:
     <meta property="og:image" content="{og_image}" />
     <meta property="og:locale" content="en_US" />
 
-    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:card" content="{twitter_card}" />
     <meta name="twitter:title" content="{TITLE}" />
     <meta name="twitter:description" content="{DESCRIPTION}" />
     <meta name="twitter:image" content="{og_image}" />
