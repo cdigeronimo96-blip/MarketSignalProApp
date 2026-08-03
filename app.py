@@ -8245,7 +8245,7 @@ def page_performance():
         _psnaps = _discover_lock_and_load_snaps(_ppool)
         _ptop = _top_since_signal(_ppool, _psnaps, 6, per_cat=2)
         if _ptop:
-            _render_conviction_grid(_ptop, "perf_ts", _psnaps)
+            _render_conviction_grid(_ptop, "perf_ts", _psnaps, mode="since")
         else:
             st.markdown('<div class="pf-note">No pick has a measured gain since its signal yet — entry prices lock the '
                         'moment a signal fires, so this fills in as the current batch matures.</div>',
@@ -8596,28 +8596,55 @@ def _since_signal_pct(cat, entry, price):
         return None, False
 
 
-def _perf_since_html(r, snap):
-    """Percent-since-signal + the actual signal timestamp. The entry price + timestamp
-    lock the first time a signal surfaces (see record_recommendations_bulk), so the %
-    keeps accumulating as the live price moves. For short signals the % is measured as
-    the SHORT's return (a decline shows green/positive, labeled 'short'). Empty until
-    a snapshot exists."""
-    if not snap:
-        return ""
+def _perf_footer_html(r, snap, mode="today"):
+    """Card footer carrying BOTH performance numbers — the Robinhood "Today / Total"
+    mechanic. `mode` only decides which one is the headline and which sits beneath it in
+    small muted type; both are always present, so flipping the toggle re-emphasises
+    information rather than hiding it.
+
+      today — this session's move.
+      since — the accumulated move from the locked entry snapshot. The entry price and
+              timestamp lock the first time a signal surfaces (record_recommendations_bulk),
+              so it keeps accruing as the live price moves. Blank until a snapshot exists;
+              never fabricated.
+
+    Both are measured in the signal's OWN direction, so a short reads positive when its
+    stock falls (labelled "short" to make that explicit — the price line at the top of the
+    card still shows the raw, unadjusted move)."""
     try:
         price = (r.get("q") or {}).get("price", 0) or 0
-        disp, is_short = _since_signal_pct(r.get("primary_cat", ""), snap.get("entry_price", 0), price)
-        if disp is None:
-            return ""
-        ts = snap.get("triggered_at", 0)
-        stamp = _signal_stamp(ts)
-        age = _humanize_age(ts)
-        when = f"{stamp} · {age}" if stamp else f"Signaled {age}"
-        pcol = GREEN if disp >= 0 else RED
-        sign = "+" if disp >= 0 else ""
-        lbl = "% since (short)" if is_short else "% since"
-        return (f'<div class="cv-perf"><span class="cv-perf-age" title="When this signal was flagged">{when}</span>'
-                f'<span style="color:{pcol};font-weight:700;font-family:JetBrains Mono,monospace;">{sign}{disp:.2f}{lbl}</span></div>')
+        cat = r.get("primary_cat", "") or ""
+        is_bear = category_dir(cat) == "bear"
+
+        since_txt = since_col = when = ""
+        if snap:
+            disp, is_short = _since_signal_pct(cat, snap.get("entry_price", 0), price)
+            if disp is not None:
+                since_col = GREEN if disp >= 0 else RED
+                since_txt = f'{"+" if disp >= 0 else ""}{disp:.2f}% since{" (short)" if is_short else ""}'
+                ts = snap.get("triggered_at", 0)
+                stamp = _signal_stamp(ts); age = _humanize_age(ts)
+                when = f"{stamp} · {age}" if stamp else f"Signaled {age}"
+
+        tp = _today_pct(r)
+        today_col = GREEN if tp >= 0 else RED
+        today_txt = f'{"+" if tp >= 0 else ""}{tp:.2f}% today{" (short)" if is_bear else ""}'
+
+        if mode == "since" and since_txt:
+            hi_txt, hi_col, lo_txt = since_txt, since_col, today_txt
+        elif mode == "since":
+            # Asked for since-signal but nothing has locked yet — say so instead of
+            # quietly promoting today's number into a slot labelled "since".
+            hi_txt, hi_col, lo_txt = today_txt, today_col, "no entry locked yet"
+        else:
+            hi_txt, hi_col = today_txt, today_col
+            lo_txt = since_txt or "no entry locked yet"
+
+        return (f'<div class="cv-perf">'
+                f'<span class="cv-perf-age" title="When this signal was flagged">{when or "New signal"}</span>'
+                f'<span class="cv-perf-nums">'
+                f'<span class="cv-perf-hi" style="color:{hi_col};">{hi_txt}</span>'
+                f'<span class="cv-perf-lo">{lo_txt}</span></span></div>')
     except Exception:
         return ""
 
@@ -8628,7 +8655,7 @@ def _perf_since_html(r, snap):
 # grid is reused). The grid renderer now injects this once per script run.
 _CV_CARD_CSS = f"""<style>
 .cv-card{{background:linear-gradient(135deg,#0d1525,#0a0f1a);border:1px solid #1c2942;
-    border-radius:12px;padding:12px 14px;min-height:120px;display:flex;flex-direction:column;
+    border-radius:12px;padding:12px 14px;min-height:128px;display:flex;flex-direction:column;
     gap:7px;margin-bottom:6px;transition:border-color .15s ease;}}
 .cv-card:hover{{border-color:rgba(99,102,241,0.5);}}
 .cv-top{{display:flex;justify-content:space-between;align-items:baseline;gap:6px;}}
@@ -8647,14 +8674,20 @@ _CV_CARD_CSS = f"""<style>
 .cv-prem svg{{color:{GOLD};}}
 .cv-why{{font-size:11px;color:#6b7fa0;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;
     -webkit-box-orient:vertical;overflow:hidden;flex:1;}}
-.cv-perf{{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;
+.cv-perf{{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;margin-top:auto;
     padding-top:7px;border-top:1px solid rgba(255,255,255,0.06);font-size:10.5px;}}
-.cv-perf-age{{color:#4a5e7a;}}
+.cv-perf-age{{color:#4a5e7a;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
+/* Two stacked numbers: the one the board is sorted by on top, the other beneath it. */
+.cv-perf-nums{{display:flex;flex-direction:column;align-items:flex-end;gap:1px;
+    line-height:1.25;flex-shrink:0;}}
+.cv-perf-hi{{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:800;white-space:nowrap;}}
+.cv-perf-lo{{font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:600;
+    color:#4a5e7a;white-space:nowrap;}}
 </style>"""
 _CV_CSS_STATE = {"done": False}   # fresh namespace per script run → one injection per run
 
 
-def _conviction_card_html(r, locked=False, snap=None):
+def _conviction_card_html(r, locked=False, snap=None, mode="today"):
     """Compact, conviction-led card atom (Top Signals). Custom category icon + clean
     name, conviction bar, one-line why, and percent-since-signal. Minimal by design —
     the full scorecard lives on the detail page."""
@@ -8688,15 +8721,19 @@ def _conviction_card_html(r, locked=False, snap=None):
                 f'<span class="cv-px" style="color:{cc};">${price:,.2f} {ar}{abs(pct):.1f}%</span>')
         tag = f'<div class="cv-tag" style="color:{ac};">{cat_icon(cat, 14)}<span>{_clean_name(cat)}</span>{short_b}</div>'
         body = f'<div class="cv-why">{why[:78]}{"…" if len(why) > 78 else ""}</div>'
-        perf = _perf_since_html(r, snap)
+        perf = _perf_footer_html(r, snap, mode)
     return (f'<div class="cv-card"><div class="cv-top">{head}</div>'
             f'<div class="cv-conv"><div class="cv-bar"><div class="cv-fill" style="width:{max(4, min(100, conv))}%;background:{convc};"></div></div>'
             f'<span class="cv-num" style="color:{convc};">{conv}</span></div>{tag}{body}{perf}</div>')
 
 
-def _render_conviction_grid(rows, key_prefix, snaps=None):
+def _render_conviction_grid(rows, key_prefix, snaps=None, mode="today"):
     """3-up grid of FULLY-CLICKABLE conviction tiles — the whole card opens the detail
-    (or the upgrade page for a locked premium pick). No separate button."""
+    (or the upgrade page for a locked premium pick). No separate button.
+
+    `mode` ("today" | "since") picks which performance number headlines each card; both
+    are always shown. Pass the same value the caller sorted by, so the headline number and
+    the ordering agree."""
     # Ensure the card styles exist on EVERY page that renders this grid (the scanner
     # previously showed raw unstyled text because only Discover injected them).
     if not _CV_CSS_STATE["done"]:
@@ -8712,7 +8749,7 @@ def _render_conviction_grid(rows, key_prefix, snaps=None):
                     continue
                 r = chunk[ci]; t = r.get("t", "")
                 locked = _cat_is_locked(r.get("primary_cat", ""))
-                if clickable_tile(_conviction_card_html(r, locked, snaps.get(t)),
+                if clickable_tile(_conviction_card_html(r, locked, snaps.get(t), mode),
                                   key=f"{key_prefix}_{_disc_key(t)}"):
                     if locked:
                         nav("pricing")
@@ -9056,23 +9093,46 @@ def _discover_body():
     # ── HOME with data: guidance + cross-category Top Signals + themed browser ──
     _render_regime_guidance(rg)
 
-    # TODAY's board means TODAY. This used to rank by conviction and backfill with anything
-    # "not underwater", so it filled with picks that fired one and two weeks ago — correct
-    # for a track record, wrong under a heading that says today. Cumulative since-signal
-    # performance now lives on the Results page; this board is strictly what's moving
-    # in the current session, measured in each signal's own direction.
+    # ONE list, two lenses — the Robinhood "Today / Total" mechanic. There used to be a
+    # second board on the Results page showing the same signals ranked by since-signal, and
+    # two lists of the same objects sorted differently is just confusing. Now the toggle
+    # re-sorts this one list and re-headlines each card; every card carries BOTH numbers
+    # regardless, so switching never hides information.
     st.markdown('<div class="disc-section-label">Today\'s Signals</div>', unsafe_allow_html=True)
-    st.markdown('<div class="disc-sub">What the engine is flagging <b style="color:#a5b4fc;">right now</b>, ranked by '
-                'today\'s move and measured in each signal\'s own direction — a short counts a decline as a gain. For how '
-                'earlier calls actually worked out, see <b style="color:#a5b4fc;">Results</b>. '
-                'Tap any card for the full breakdown.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="disc-sub">What the engine is flagging <b style="color:#a5b4fc;">right now</b>. Every pick '
+                'shows both its move <b style="color:#a5b4fc;">today</b> and its move <b style="color:#a5b4fc;">since '
+                'the signal fired</b>, measured in the signal\'s own direction — a short counts a decline as a gain. '
+                'Switch which one ranks the board below. Tap any card for the full breakdown.</div>',
+                unsafe_allow_html=True)
+
+    _SORT_TODAY, _SORT_SINCE = "Today's move", "Since signal"
+    try:
+        _sort = st.segmented_control("Rank by", [_SORT_TODAY, _SORT_SINCE],
+                                     default=_SORT_TODAY, key="disc_sort_mode",
+                                     label_visibility="collapsed")
+    except Exception:
+        # segmented_control landed in Streamlit 1.40 (our floor), but never let a widget
+        # API difference take the whole board down.
+        _sort = st.radio("Rank by", [_SORT_TODAY, _SORT_SINCE], horizontal=True,
+                         key="disc_sort_mode_radio", label_visibility="collapsed")
+    _sort = _sort or _SORT_TODAY          # segmented_control returns None when deselected
+    _mode = "since" if _sort == _SORT_SINCE else "today"
+
     # Sample every category before ranking, so one high-edge category can't fill the board.
     pool = _signal_candidates(grouped)
     snaps = _discover_lock_and_load_snaps(pool)
-    top = _top_movers_today(pool, 6, per_cat=2)
+    if _mode == "since":
+        top = _top_since_signal(pool, snaps, 6, per_cat=2)
+        if not top:                  # nothing has a locked entry yet
+            st.markdown('<div class="disc-sub" style="color:#4a5e7a;">No pick has a measured move since its signal '
+                        'yet — entry prices lock as signals fire, so this fills in shortly. Showing today\'s movers '
+                        'meanwhile.</div>', unsafe_allow_html=True)
+            top = _top_movers_today(pool, 6, per_cat=2)
+    else:
+        top = _top_movers_today(pool, 6, per_cat=2)
     if not top:                      # flat/closed tape — nothing is up in its own direction
         top = _top_signals(grouped, 6)
-    _render_conviction_grid(top, "ts", snaps)
+    _render_conviction_grid(top, "ts", snaps, mode=_mode)
 
     # ── Browse by signal (6 themed groups) ──
     st.markdown('<div class="disc-section-label" style="margin-top:26px;">Browse by Signal</div>', unsafe_allow_html=True)
@@ -10183,6 +10243,14 @@ def page_signals():
                            if (s.get("count") or 0) > 0}
         except Exception:
             _win_by_cat = {}
+    # The slider's ceiling is the BEST win rate that actually exists, not 100. A fixed
+    # 0-100 range spent most of its travel on thresholds no category could ever meet, so
+    # the useful band was a few pixels wide and any drag past the real maximum silently
+    # emptied the feed. Stepping by 1 matters for the same reason — real win rates cluster
+    # in a narrow band, and 5-point steps skip straight over the categories you're trying
+    # to separate. When nothing has resolved yet the control is hidden entirely rather
+    # than shown as a slider that can only ever wipe the list.
+    _win_ceiling = int(max(_win_by_cat.values())) if _win_by_cat else 0
     _dir, _min_win = "All", 0
     if is_premium():
         ac1, ac2 = st.columns([1.4, 2])
@@ -10190,11 +10258,21 @@ def page_signals():
             _dir = st.radio("Direction", ["All", "Long", "Short"], horizontal=True,
                             key="sig_dir_filter")
         with ac2:
-            _min_win = st.slider(
-                "Min category win rate %", 0, 100, 0, step=5, key="sig_min_win",
-                help="Keep only signals from categories whose tracked outcomes have been "
-                     "correct at least this often. Categories with no resolved outcomes yet "
-                     "are hidden once this is above 0.")
+            if _win_ceiling > 0:
+                _min_win = st.slider(
+                    "Min category win rate %", 0, _win_ceiling, 0, step=1, key="sig_min_win",
+                    help=f"Keep only signals whose category has been correct at least this "
+                         f"often across its tracked outcomes. Applies whether or not you've "
+                         f"picked categories above — with categories selected it narrows "
+                         f"those further. {len(_win_by_cat)} categor"
+                         f"{'y has' if len(_win_by_cat) == 1 else 'ies have'} resolved "
+                         f"outcomes so far; the best is {_win_ceiling}%. Categories with no "
+                         f"resolved outcomes yet are excluded once this is above 0.")
+            else:
+                st.markdown('<div style="font-size:11.5px;color:#4a5e7a;padding-top:26px;">'
+                            'Win-rate filter unlocks once tracked signals resolve '
+                            '(outcomes settle over 1–30 trading days).</div>',
+                            unsafe_allow_html=True)
     elif events:
         # Gate on "there is a feed", not on "_feed_cats is non-empty" — a feed made up
         # entirely of insider/8-K/short-interest rows has no categories but is still
