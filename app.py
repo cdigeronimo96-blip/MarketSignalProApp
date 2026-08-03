@@ -6129,10 +6129,17 @@ def render_topbar(active=None):
 [class*="st-key-navtb_"] button {{
     display:inline-flex !important; align-items:center !important; justify-content:center !important;
 }}
-[class*="st-key-navtb_"] button [data-testid="stMarkdownContainer"],
+/* The label must be a BLOCK, not a flex box. It was `display:flex` + `overflow:hidden`,
+   and an overflowing centred flex item is clipped at BOTH ends — which is why every tab
+   read "arket Overvie" / "erformanc" rather than truncating with an ellipsis. As a block
+   with nowrap the ellipsis actually applies, and the button (already flex) does the
+   centring. min-width:0 lets it shrink below its content width instead of overflowing. */
+[class*="st-key-navtb_"] button [data-testid="stMarkdownContainer"] {{
+    min-width:0 !important; max-width:100% !important; overflow:hidden !important;
+}}
 [class*="st-key-navtb_"] button [data-testid="stMarkdownContainer"] p {{
     margin:0 !important; padding:0 !important; line-height:1.2 !important;
-    display:flex !important; align-items:center !important; justify-content:center !important;
+    display:block !important; white-space:nowrap !important;
     overflow:hidden !important; text-overflow:ellipsis !important;
 }}
 /* The Brief pill carries a live count ("🔔 Brief (12)") — tighter padding so the
@@ -6331,7 +6338,11 @@ def render_topbar(active=None):
         # is performing, then the signal surfaces (Discover → Brief → Refine), then
         # the personal/utility tabs. "Refine" = the old Refine scanner (it filters
         # the CURRENT signals by parameters — "Scanner" wrongly implied a new scan).
-        pages = [("Market Overview","dashboard"), ("Performance","performance"),
+        # "Market" not "Market Overview": with an owner/admin signed in there are nine tabs
+        # plus the logo and account menu, and the longest label was squeezing every other
+        # pill. The page still titles itself "Market Overview" in its own header, and the
+        # bottom (PWA) nav already used "Market", so this is also the consistent name.
+        pages = [("Market","dashboard"), ("Performance","performance"),
                  ("Discover","discover"), (_sig_lbl,"signals")]
         if is_premium():   # Refine (signal filtering) is premium-only — hide it from the free-user nav
             pages.append(("Refine","screener"))
@@ -6341,18 +6352,16 @@ def render_topbar(active=None):
         ri = {"owner":"👑","admin":"🛡️","premium":"⭐","free":"👤"}.get(st.session_state.role,"👤")
         first = (st.session_state.user.get("name","") or "").split()[0]
 
-        # Pill widths follow their label length (equal pills clipped "Market
-        # Overview" and squeezed short labels with dead space). The Brief tab gets
-        # extra width when it carries an unseen count — otherwise "🔔 Brief (12)"
-        # overflowed its fixed-width pill and rendered clipped.
-        _W = {"dashboard": 1.55, "performance": 1.3, "watchlist": 1.2}
-        nav_ratios = [_W.get(_pg, 1.0) for (_, _pg) in pages]
-        if _unseen:
-            for _pi, (_, _pg) in enumerate(pages):
-                if _pg == "signals":
-                    nav_ratios[_pi] = 1.3
-                    break
-        ratios = [2.9] + nav_ratios + [1.6]
+        # Pill widths are DERIVED from the label, not hand-tuned per page: a per-page
+        # lookup table drifts the moment a label changes (which is how "Performance" and
+        # "Watchlist" ended up clipped). ~7 characters fit in one ratio unit at 12.5px,
+        # and the floor keeps short labels from collapsing to a sliver. Emoji count double
+        # because they render roughly two characters wide.
+        def _nav_ratio(label):
+            width = sum(2 if ord(ch) > 0x2100 else 1 for ch in label)
+            return max(0.92, round(width / 7.0, 2))
+        nav_ratios = [_nav_ratio(_lbl) for (_lbl, _) in pages]
+        ratios = [2.2] + nav_ratios + [1.5]
         cols = st.columns(ratios, gap="small")
 
         with cols[0]:
@@ -6824,36 +6833,40 @@ def page_landing():
         # completed — never placeholder cards with made-up numbers.
         #
         # Three deliberate choices here, all visible to logged-out visitors and crawlers:
-        #  1. TICKERS ARE REDACTED — masked to block glyphs server-side, then blurred so the
-        #     redaction reads as deliberate. The names ARE the product; the landing proves the
-        #     engine works without giving the day's picks away, and because the symbol never
-        #     reaches the DOM, view-source and crawlers can't lift it either. The headline
-        #     number on each card is the measured % since signal, not the price.
-        #  2. BOTH DIRECTIONS. The feed is split into LONG and SHORT sections so the bear/short
-        #     half of the engine is visible up front, plus a header pill carrying the day's
-        #     overall long/short split across every signal (not just the cards shown).
-        #  3. NO DUPLICATE CARDS. This used to be a CSS marquee that rendered the card list
-        #     TWICE to fake a seamless loop, so every ticker visibly appeared twice. It's a
-        #     static, de-duplicated list now — each signal appears exactly once.
-        def _sigcard(t, since, since_col, age, sc, col, cat, sub):
-            # since_col empty → no locked snapshot yet, so we say so instead of inventing a %.
-            since_html = (f'<span class="sp-pct" style="color:{since_col};">{since}</span>'
-                          if since_col else f'<span class="sp-new">{since}</span>')
-            return (f'<div class="sig"><div class="r1">'
+        #  1. TICKERS ARE REDACTED — masked to block glyphs server-side. Crisp, not blurred:
+        #     a blurred symbol reads as a rendering fault, solid blocks read as deliberate.
+        #     The names ARE the product; the landing proves the engine works without giving
+        #     the day's picks away, and because the symbol never reaches the DOM, view-source
+        #     and crawlers can't lift it either.
+        #  2. FOUR SECTIONS — long and short, each split into "best since signal" (the
+        #     accumulated move from the locked entry, which may be weeks old) and "moving
+        #     today" (this session's move). Those are different claims and the panel must not
+        #     blur them together. The header pill carries the day's overall long/short split
+        #     across every signal, not just the rows shown.
+        #  3. EACH SIGNAL APPEARS ONCE. Tickers are de-duped ACROSS all four sections, and the
+        #     list is static — it used to be a CSS marquee that rendered the cards twice over
+        #     to fake a seamless loop, so every signal visibly appeared twice.
+        def _sigrow(mask, metric, metric_col, cat, sub, sc, accent):
+            """One compact signal row. Ten of these have to fit the panel, so it's a single
+            line: redacted ticker, category, conviction bar + score, then the metric for
+            whichever section it sits in (% since signal, or % today)."""
+            return (f'<div class="sig">'
                     f'<span class="tlock">{_lock_svg(11)}</span>'
-                    f'<span class="tick">{t}</span><span class="tage">{age}</span>{since_html}</div>'
-                    f'<div class="r2"><span class="tag">{cat_icon(cat,14)}'
+                    f'<span class="tick">{mask}</span>'
+                    f'<span class="tag" style="color:{accent};">{cat_icon(cat, 13)}'
                     f'<span>{_clean_name(cat)}<span class="sub">{sub}</span></span></span>'
-                    f'<div class="bar"><div class="fill" style="width:{max(4,min(100,sc))}%;background:{col};"></div></div>'
-                    f'<span class="num" style="color:{col};">{sc}</span></div></div>')
+                    f'<div class="bar"><div class="fill" style="width:{max(4, min(100, sc))}%;'
+                    f'background:linear-gradient(90deg,{accent}88,{accent});"></div></div>'
+                    f'<span class="num" style="color:{accent};">{sc}</span>'
+                    f'<span class="met" style="color:{metric_col};">{metric}</span></div>')
         def _hero_sub(r):
             info = r.get("info") or {}
             ib = int(info.get("insider_buys") or 0); dtc = float(info.get("dtc") or 0)
             if ib >= 2:  return f" · {ib} insider buys"
             if dtc >= 3: return f" · {dtc:.1f} days to cover"
             return ""
-        _HERO_LONG_N, _HERO_SHORT_N = 3, 2       # cards per direction section
-        _live_long, _live_short = [], []
+        _HERO_SINCE_N, _HERO_TODAY_N = 3, 2      # rows per "since signal" / "today" section
+        _sec_long_since = _sec_long_today = _sec_short_since = _sec_short_today = []
         _snaps = {}
         _n_long = _n_short = 0
         try:
@@ -6861,96 +6874,71 @@ def page_landing():
             if _warm:
                 # A "signal" is any warm row the engine assigned a primary category. The
                 # overall split below counts EVERY one of them — it's the day's real
-                # long/short breakdown, not a summary of the handful of cards on screen.
+                # long/short breakdown, not a summary of the handful of rows on screen.
                 _sig_rows = [r for r in _warm if r.get("primary_cat")]
                 _short_rows = [r for r in _sig_rows if category_dir(r.get("primary_cat", "")) == "bear"]
                 _long_rows  = [r for r in _sig_rows if category_dir(r.get("primary_cat", "")) != "bear"]
                 _n_short, _n_long = len(_short_rows), len(_long_rows)
 
-                # Rank each side separately, then fetch snapshots ONCE for the combined
-                # candidate set so the winners-only filter has entry prices to measure.
-                _cand_l = _top_signals({"_": _long_rows}, n=24)
-                _cand_s = _top_signals({"_": _short_rows}, n=24)
+                def _by_cat(rows):
+                    g = {}
+                    for r in rows:
+                        g.setdefault(r.get("primary_cat"), []).append(r)
+                    return g
+
+                # Sample every category before ranking (see _signal_candidates), then drop
+                # penny names — the hero is marketing and a $0.40 name reads badly.
+                def _cands(rows, per_cat, cap):
+                    return [r for r in _signal_candidates(_by_cat(rows), per_cat=per_cat, cap=cap)
+                            if ((r.get("q") or {}).get("price", 0) or 0) >= HERO_MIN_PRICE]
+                _cand_l = _cands(_long_rows, 3, 90)
+                _cand_s = _cands(_short_rows, 8, 40)   # only 3 bear categories exist — go deeper
                 _snaps = _hero_snaps(_cand_l + _cand_s)
 
-                def _hero_pick(cands, want):
-                    """Winners-only, ≥HERO_MIN_PRICE, one per category. Deterministic: a
-                    larger `want` returns a superset that starts with the smaller result,
-                    which is what lets the short-side backfill below stay duplicate-free."""
-                    out, cat_seen = [], {}
-                    for r in cands:
-                        if ((r.get("q") or {}).get("price", 0) or 0) < HERO_MIN_PRICE:
-                            continue                              # skip penny names on the hero
-                        # Winners only (same rule as the Discover board): drop a pick that's
-                        # underwater in its own called direction; keep fresh/no-snapshot picks.
-                        _d, _ = _since_signal_pct(r.get("primary_cat", ""),
-                                                  (_snaps.get(r.get("t")) or {}).get("entry_price", 0),
-                                                  (r.get("q") or {}).get("price", 0))
-                        if _d is not None and _d < 0:
-                            continue
-                        _c = r.get("primary_cat", "")
-                        # ONE per category. The in-app boards allow two, but here the ticker
-                        # is masked, so two cards from the same category with similar moves
-                        # are indistinguishable — they read as the duplicate rows this panel
-                        # is supposed to have stopped showing.
-                        if _c in cat_seen:
-                            continue
-                        cat_seen[_c] = 1
-                        out.append(r)
-                        if len(out) >= want:
-                            break
-                    return out
-
-                _live_long  = _hero_pick(_cand_l, _HERO_LONG_N)
-                _live_short = _hero_pick(_cand_s, _HERO_SHORT_N)
-                # Bear side quiet today (a normal, honest outcome in a strong tape)? Give the
-                # empty slots back to the long side so the panel never shows dead space — the
-                # short section header still says plainly that nothing qualified.
-                if len(_live_short) < _HERO_SHORT_N:
-                    _live_long = _hero_pick(_cand_l, _HERO_LONG_N + (_HERO_SHORT_N - len(_live_short)))
-                if not _live_long and not _live_short:   # filters removed everything → fall back
-                    _live_long, _live_short = _cand_l[:_HERO_LONG_N], _cand_s[:_HERO_SHORT_N]
+                # One shared `seen` set across all four sections: a pick that is both a top
+                # performer since signal AND a big mover today must appear once, not twice.
+                _seen_t = set()
+                _sec_long_since  = _top_since_signal(_cand_l, _snaps, _HERO_SINCE_N,
+                                                     per_cat=1, seen_tickers=_seen_t)
+                _sec_long_today  = _top_movers_today(_cand_l, _HERO_TODAY_N,
+                                                     per_cat=1, seen_tickers=_seen_t)
+                _sec_short_since = _top_since_signal(_cand_s, _snaps, _HERO_SINCE_N,
+                                                     per_cat=2, seen_tickers=_seen_t)
+                _sec_short_today = _top_movers_today(_cand_s, _HERO_TODAY_N,
+                                                     per_cat=2, seen_tickers=_seen_t)
         except Exception:
-            _live_long, _live_short = [], []
+            _sec_long_since = _sec_long_today = _sec_short_since = _sec_short_today = []
 
-        def _hero_tuple(r):
-            """Row → _sigcard args. The ticker is MASKED here, not just visually blurred:
-            we emit block glyphs, so the day's picks are absent from the DOM entirely and
-            can't be lifted by view-source or a crawler."""
-            q = r.get("q") or {}; price = q.get("price", 0) or 0
-            conv = int(r.get("conviction") or r.get("sc") or 0); cat = r.get("primary_cat", "") or ""
-            _bear = category_dir(cat) == "bear"
-            col = (("#fb7185" if conv >= 70 else "#fb923c" if conv >= 45 else "#94a3b8") if _bear
-                   else ("#34d399" if conv >= 70 else "#f59e0b" if conv >= 45 else "#94a3b8"))
+        def _hero_row(r, mode):
+            """Row → _sigrow args. `mode` decides which number the row carries, and the two
+            are never interchangeable: 'since' is the accumulated move from the locked entry
+            snapshot, 'today' is this session's move. Both are measured in the signal's own
+            direction, so a short's decline reads positive. Nothing is fabricated — a row
+            can only reach the 'since' sections if it HAS a snapshot to measure."""
+            cat = r.get("primary_cat", "") or ""
+            conv = int(r.get("conviction") or r.get("sc") or 0)
             mask = "█" * max(3, min(5, len(r.get("t", "") or "")))
-            # TRUE % since signal from the locked entry snapshot — never fabricated. With no
-            # snapshot yet we say "just signaled" rather than invent a number. Shorts are
-            # measured as shorts: a decline reads positive/green.
-            since, since_col, age = "Just signaled", "", ""
-            _snap = _snaps.get(r.get("t"))
-            if _snap:
-                _since, _is_short = _since_signal_pct(cat, _snap.get("entry_price", 0), price)
-                if _since is not None:
-                    _sign = "+" if _since >= 0 else ""
-                    since = f'{_sign}{_since:.1f}% since'
-                    since_col = "#34d399" if _since >= 0 else "#fb7185"
-                    age = _humanize_age(_snap.get("triggered_at", 0))
-            return (mask, since, since_col, age, conv, col, cat, _hero_sub(r))
+            if mode == "since":
+                snap = _snaps.get(r.get("t")) or {}
+                val, _ = _since_signal_pct(cat, snap.get("entry_price", 0),
+                                           (r.get("q") or {}).get("price", 0))
+                suffix = "since"
+            else:
+                val, suffix = _today_pct(r), "today"
+            val = 0.0 if val is None else val
+            metric = f'{"+" if val >= 0 else ""}{val:.1f}% {suffix}'
+            metric_col = "#34d399" if val >= 0 else "#fb7185"
+            return (mask, metric, metric_col, cat, _hero_sub(r), conv, cat_accent(cat))
 
-        def _hero_section(rows, label, tone, count, empty_msg, extra_cls=""):
-            """One direction block: a labelled rule + its cards (or an honest empty note)."""
-            head = (f'<div class="sec {extra_cls}"><span class="sec-l" style="color:{tone};">{label}</span>'
-                    f'<span class="sec-r"></span>'
-                    f'<span class="sec-n">{count} today</span></div>')
+        def _hero_section(rows, label, tone, mode, count_html="", empty_msg="", cls=""):
+            """One labelled block: a rule + its rows, or an honest note when it's empty."""
+            head = (f'<div class="sec {cls}"><span class="sec-l" style="color:{tone};">{label}</span>'
+                    f'<span class="sec-r"></span><span class="sec-n">{count_html}</span></div>')
             if not rows:
                 return head + f'<div class="sec-empty">{empty_msg}</div>'
-            # Measured picks lead — the panel's job is to prove the engine, so cards that
-            # carry a real % since signal sort ahead of ones still waiting on a snapshot.
-            cards = [_hero_tuple(r) for r in rows]
-            cards.sort(key=lambda c: 0 if c[2] else 1)
-            return head + "".join(_sigcard(*c) for c in cards)
+            return head + "".join(_sigrow(*_hero_row(r, mode)) for r in rows)
 
-        _is_live = bool(_live_long or _live_short)
+        _is_live = bool(_sec_long_since or _sec_long_today or _sec_short_since or _sec_short_today)
         if _is_live:
             _dot = '<span class="ldot"></span>'
             _tot = _n_long + _n_short
@@ -6958,11 +6946,17 @@ def page_landing():
             _ppill = (f'{round(_n_long * 100 / _tot)}% long · {round(_n_short * 100 / _tot)}% short'
                       if _tot else 'Live · Conviction-ranked')
             _feed = ('<div class="feedwrap">'
-                     + _hero_section(_live_long, "▲ Long setups", "#34d399", _n_long,
-                                     "No long setups cleared the bar right now.")
-                     + _hero_section(_live_short, "▼ Short setups", "#fb7185", _n_short,
-                                     "No short setups qualified today — the engine only "
-                                     "flags the bear book when the setups are actually there.", "s2")
+                     + _hero_section(_sec_long_since, "▲ Long · best since signal", "#34d399", "since",
+                                     f"{_n_long:,} long today",
+                                     "No long pick has a measured gain since its signal yet.")
+                     + _hero_section(_sec_long_today, "▲ Long · moving today", "#34d399", "today", "",
+                                     "The long book is flat so far this session.", "s2")
+                     + _hero_section(_sec_short_since, "▼ Short · best since signal", "#fb7185", "since",
+                                     f"{_n_short:,} short today",
+                                     "No short pick has a measured gain since its signal yet.", "s2")
+                     + _hero_section(_sec_short_today, "▼ Short · moving today", "#fb7185", "today", "",
+                                     "No short setups are working today — the engine only flags "
+                                     "the bear book when the setups are actually there.", "s2")
                      + '</div>')
         else:
             _dot = '<span class="ldot" style="background:#5d6b86;animation:none;"></span>'; _ppill = 'Warming up…'
@@ -6984,35 +6978,37 @@ def page_landing():
         /* Static list — no marquee. The old version animated a DOUBLED copy of the cards
            to fake a seamless loop, which showed every signal twice. */
         .feedwrap{{flex:1;min-height:0;overflow:hidden;}}
-        /* ── Direction section header ── */
-        .sec{{display:flex;align-items:center;gap:9px;margin:0 0 7px;}}
-        .sec.s2{{margin-top:11px;}}
-        .sec-l{{font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;flex-shrink:0;}}
+        /* ── Section header (one per direction × timeframe) ── */
+        .sec{{display:flex;align-items:center;gap:9px;margin:0 0 6px;}}
+        .sec.s2{{margin-top:10px;}}
+        .sec-l{{font-size:9.5px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;flex-shrink:0;}}
         .sec-r{{flex:1;height:1px;background:rgba(255,255,255,.08);}}
-        .sec-n{{font-size:10px;font-weight:600;color:#5d6b86;flex-shrink:0;}}
-        .sec-empty{{font-size:11px;color:#5d6b86;line-height:1.5;background:#0c1322;
-            border:1px dashed #1a2740;border-radius:10px;padding:9px 12px;margin-bottom:7px;}}
-        /* ── Signal card ── */
-        .sig{{background:#0c1322;border:1px solid #1a2740;border-radius:11px;padding:8px 12px;margin-bottom:7px;}}
-        .r1{{display:flex;align-items:center;gap:8px;margin-bottom:6px;}}
-        /* Ticker is redacted: these are block glyphs, not the real symbol (see _hero_tuple),
-           blurred so the redaction reads as deliberate rather than as a loading skeleton. */
-        .tick{{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:800;color:#41527a;
-            letter-spacing:1px;filter:blur(2.5px);user-select:none;flex-shrink:0;}}
-        .tlock{{display:inline-flex;color:#5d6b86;flex-shrink:0;}}
-        .tage{{font-size:10px;color:#5d6b86;flex-shrink:0;}}
-        .sp-pct{{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:14.5px;font-weight:800;flex-shrink:0;}}
-        .sp-new{{margin-left:auto;font-size:10px;font-weight:700;color:#a5b4fc;background:rgba(99,102,241,.12);
-            border:1px solid rgba(99,102,241,.28);border-radius:999px;padding:2px 8px;flex-shrink:0;}}
-        .r2{{display:flex;align-items:center;gap:9px;}}
-        .bar{{flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;min-width:30px;}}
-        .fill{{height:6px;border-radius:3px;}}
-        .num{{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:800;min-width:20px;text-align:right;}}
-        .tag{{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:#a5b4fc;
-            min-width:0;flex:0 1 auto;max-width:56%;}}
+        .sec-n{{font-size:9.5px;font-weight:600;color:#5d6b86;flex-shrink:0;}}
+        .sec-empty{{font-size:10.5px;color:#5d6b86;line-height:1.5;background:#0c1322;
+            border:1px dashed #1a2740;border-radius:9px;padding:7px 11px;margin-bottom:6px;}}
+        /* ── Signal row — one line, so ten fit. Surfaces match the in-app conviction cards
+              (same gradient, border and radius) so the hero reads as the same product. ── */
+        .sig{{display:flex;align-items:center;gap:9px;
+            background:linear-gradient(135deg,#0d1525,#0a0f1a);border:1px solid #1c2942;
+            border-radius:10px;padding:7px 11px;margin-bottom:6px;}}
+        /* Redacted ticker: block glyphs, NOT the real symbol (see _hero_row). Rendered
+           crisp — a blurred symbol reads as a rendering fault or a half-loaded skeleton,
+           whereas solid blocks read as a deliberate redaction. */
+        .tick{{font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:800;
+            color:#35455f;letter-spacing:1.5px;user-select:none;flex-shrink:0;}}
+        .tlock{{display:inline-flex;color:#41527a;flex-shrink:0;}}
+        .tag{{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;
+            min-width:0;flex:0 1 172px;}}
         .tag>span{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
-        .tag .msp-ic{{color:#818cf8;flex-shrink:0;}}
+        .tag .msp-ic{{flex-shrink:0;}}   /* colour inherits the per-theme accent */
         .sub{{color:#5d6b86;font-weight:600;}}
+        .bar{{flex:1 1 auto;height:7px;background:rgba(255,255,255,.06);border-radius:4px;
+            overflow:hidden;min-width:26px;}}
+        .fill{{height:7px;border-radius:4px;}}
+        .num{{font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:800;
+            min-width:20px;text-align:right;flex-shrink:0;}}
+        .met{{font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:800;
+            min-width:80px;text-align:right;flex-shrink:0;}}
         .pfoot{{font-size:10.5px;color:#5d6b86;text-align:center;margin-top:9px;}}
         .msp-ic{{vertical-align:-3px;}}
         </style>
@@ -7026,9 +7022,9 @@ def page_landing():
           data, SEC filings &amp; short interest</div>
         </div>
         """
-        # 500 (was 466): the two direction sections + their headers need the extra room, and
-        # the panel no longer scrolls, so anything that overflows would be silently clipped.
-        _html_iframe(hero_comp, 500)   # isolated iframe (sets html/body + generic classes)
+        # Sized for the worst case: 4 section headers + 10 single-line rows. The panel no
+        # longer scrolls, so anything that overflows is silently clipped rather than reachable.
+        _html_iframe(hero_comp, 560)   # isolated iframe (sets html/body + generic classes)
 
     st.markdown('</div>', unsafe_allow_html=True)  # close hero-wrap
 
@@ -8211,20 +8207,31 @@ def page_performance():
             'this band fills in on its own as the first signals mature.</div></div>',
             unsafe_allow_html=True)
 
-    # ── 2) Today's top performers — winners since their signal ──
+    # ── 2) Top performers SINCE SIGNAL — ranked by the accumulated move, not conviction ──
+    # This list is the whole point of the page, so it is ordered by the measured move since
+    # each signal fired and picks with no locked snapshot are left out entirely. Ordering by
+    # conviction and backfilling "anything not underwater" is what let a signal from two
+    # minutes ago — which by definition has accumulated nothing — head the list.
     st.markdown('<div class="pf-lbl">🏆 Top Performers · since signal</div>', unsafe_allow_html=True)
-    st.markdown('<div class="pf-note">The model\'s current winners: longs in the green since they were flagged; '
-                'shorts labeled SHORT and measured as shorts (a decline = a win). Tap any card for the full breakdown.</div>',
+    st.markdown('<div class="pf-note">The model\'s best picks by how far they\'ve moved <b style="color:#a5b4fc;">since '
+                'the signal fired</b> — days or weeks ago, not just today. Longs measured up, shorts labeled SHORT and '
+                'measured as shorts (a decline = a win). For what\'s moving in today\'s session, see '
+                '<b style="color:#a5b4fc;">Discover</b>. Tap any card for the full breakdown.</div>',
                 unsafe_allow_html=True)
     try:
         _pgrouped = _discover_grouped()
     except Exception:
         _pgrouped = {}
     if _pgrouped:
-        _ppool = _top_signals(_pgrouped, 18)
+        _ppool = _signal_candidates(_pgrouped)
         _psnaps = _discover_lock_and_load_snaps(_ppool)
-        _ptop = _winning_top_signals(_ppool, _psnaps, 6)
-        _render_conviction_grid(_ptop, "perf_ts", _psnaps)
+        _ptop = _top_since_signal(_ppool, _psnaps, 6, per_cat=2)
+        if _ptop:
+            _render_conviction_grid(_ptop, "perf_ts", _psnaps)
+        else:
+            st.markdown('<div class="pf-note">No pick has a measured gain since its signal yet — entry prices lock the '
+                        'moment a signal fires, so this fills in as the current batch matures.</div>',
+                        unsafe_allow_html=True)
     else:
         st.markdown('<div class="pf-note">The scan is warming — top performers appear in a moment.</div>',
                     unsafe_allow_html=True)
@@ -8438,33 +8445,108 @@ def _top_signals(grouped, n=6):
     return out
 
 
+# ── The two performance concepts ─────────────────────────────────────────────────────
+# These are DIFFERENT questions and every board that shows one must not silently show the
+# other:
+#   • SINCE SIGNAL — the measured move from the locked entry snapshot, in the called
+#     direction. Cumulative and open-ended: a pick that fired two weeks ago and kept
+#     working is exactly what belongs at the top. This is the model's track record.
+#   • TODAY        — the intraday move (q.pct), also in the called direction. Resets every
+#     session. This is "what is running right now", independent of when the signal fired.
+# Ranking by conviction and labelling the result either way is what produced a "Today's
+# Board" full of week-old picks and a "since signal" list led by a two-minute-old signal.
+
+def _cat_diverse(rows, n, per_cat=1, seen_tickers=None):
+    """First `n` rows, at most `per_cat` per primary category, order preserved.
+    `seen_tickers` (a mutable set) additionally de-dupes ACROSS sections of one board."""
+    out, cat_seen = [], {}
+    for r in rows:
+        t = r.get("t")
+        if seen_tickers is not None and t in seen_tickers:
+            continue
+        c = r.get("primary_cat", "")
+        if cat_seen.get(c, 0) >= per_cat:
+            continue
+        cat_seen[c] = cat_seen.get(c, 0) + 1
+        out.append(r)
+        if seen_tickers is not None:
+            seen_tickers.add(t)
+        if len(out) >= n:
+            break
+    return out
+
+
+def _signal_candidates(grouped, per_cat=4, cap=160):
+    """A ranked candidate pool that samples EVERY category before ranking.
+
+    _top_signals ranks by conviction × the category's backtested edge, and the highest-edge
+    category (Relative Strength) has enough high scorers to fill the entire head of that
+    list on its own. That is why the board rendered six near-identical Relative Strength
+    cards, and why a downstream one-per-category filter could only ever find a single pick.
+    Taking the best `per_cat` from each category FIRST guarantees the pool spans the board.
+    """
+    pool = []
+    for _cat, rows in (grouped or {}).items():
+        pool.extend(sorted(rows, key=lambda r: (r.get("conviction") or r.get("sc") or 0),
+                           reverse=True)[:per_cat])
+    pool.sort(key=lambda r: (r.get("conviction") or r.get("sc") or 0)
+              * category_edge(r.get("primary_cat", "")), reverse=True)
+    seen, out = set(), []
+    for r in pool:
+        t = r.get("t")
+        if t and t not in seen:
+            seen.add(t); out.append(r)
+        if len(out) >= cap:
+            break
+    return out
+
+
+def _today_pct(r):
+    """Today's move in the signal's OWN direction (a bear pick counts a decline as a gain)."""
+    try:
+        pct = float((r.get("q") or {}).get("pct", 0) or 0)
+    except Exception:
+        return 0.0
+    return -pct if category_dir(r.get("primary_cat", "") or "") == "bear" else pct
+
+
+def _top_since_signal(rows, snaps, n, per_cat=1, min_pct=0.0, seen_tickers=None):
+    """Best MEASURED move since the signal fired, in the called direction.
+
+    Rows with no locked snapshot are EXCLUDED rather than backfilled: there is nothing to
+    measure yet, and letting them through is what put a two-minute-old signal at the head
+    of a list whose whole premise is accumulated performance."""
+    scored = []
+    for r in rows:
+        snap = snaps.get(r.get("t"))
+        if not snap:
+            continue
+        d, _ = _since_signal_pct(r.get("primary_cat", ""), snap.get("entry_price", 0),
+                                 (r.get("q") or {}).get("price", 0))
+        if d is None or d < min_pct:
+            continue
+        scored.append((d, r))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return _cat_diverse([r for _, r in scored], n, per_cat, seen_tickers)
+
+
+def _top_movers_today(rows, n, per_cat=1, min_pct=0.0, seen_tickers=None):
+    """Biggest move TODAY in the called direction — regardless of when the signal fired."""
+    scored = [(_today_pct(r), r) for r in rows]
+    scored = [(p, r) for p, r in scored if p > min_pct]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return _cat_diverse([r for _, r in scored], n, per_cat, seen_tickers)
+
+
 def _lock_svg(size=13):
     return _svg('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', size)
 
 
-def _winning_top_signals(pool, snaps, n=6):
-    """The board shows WINNERS only: longs in the green since their signal, and shorts
-    whose stock has FALLEN since the signal (a short's win — the card carries the SHORT
-    badge and its %-since is measured as the short's return). A pick that's underwater
-    in its own called direction is dropped. Fresh signals with no locked snapshot yet
-    (or no price) aren't losers — they backfill remaining slots, newest-conviction
-    first, so the board never sits empty on a slow day."""
-    winners, fresh = [], []
-    for r in pool:
-        snap = snaps.get(r.get("t"))
-        disp, _ = _since_signal_pct(r.get("primary_cat", ""),
-                                    (snap or {}).get("entry_price", 0),
-                                    (r.get("q") or {}).get("price", 0))
-        if disp is None:
-            fresh.append(r)
-        elif disp >= 0:
-            winners.append(r)
-    out = winners[:n]
-    for r in fresh:
-        if len(out) >= n:
-            break
-        out.append(r)
-    return out
+# REMOVED: _winning_top_signals(). It ordered by CONVICTION, kept anything "not underwater",
+# and backfilled the rest with snapshot-less signals — so under a "since signal" heading it
+# surfaced picks with nothing accumulated yet (a two-minute-old signal led the list), and
+# under a "today" heading it surfaced picks that had fired a fortnight ago. Use
+# _top_since_signal() or _top_movers_today(); each ranks by the number it actually claims.
 
 
 def _signal_stamp(ts):
@@ -8956,13 +9038,22 @@ def _discover_body():
     # ── HOME with data: guidance + cross-category Top Signals + themed browser ──
     _render_regime_guidance(rg)
 
-    st.markdown('<div class="disc-section-label">Today\'s Board · Top Signals</div>', unsafe_allow_html=True)
-    st.markdown('<div class="disc-sub">The market\'s current winners, ranked by our blended Conviction Score — longs in the green since their signal, shorts labeled and measured as shorts, plus today\'s freshest setups. (Your daily brief pings just what\'s new.) Tap any card for the full breakdown.</div>', unsafe_allow_html=True)
-    # Pull a deep pool, lock/load its snapshots, then keep only the picks that are
-    # WORKING (or brand-new) — a long that's down since signal doesn't belong on the board.
-    pool = _top_signals(grouped, 24)
+    # TODAY's board means TODAY. This used to rank by conviction and backfill with anything
+    # "not underwater", so it filled with picks that fired one and two weeks ago — correct
+    # for a track record, wrong under a heading that says today. Cumulative since-signal
+    # performance now lives on the Performance page; this board is strictly what's moving
+    # in the current session, measured in each signal's own direction.
+    st.markdown('<div class="disc-section-label">Today\'s Board · Moving Now</div>', unsafe_allow_html=True)
+    st.markdown('<div class="disc-sub">The signals with the biggest move <b style="color:#a5b4fc;">in today\'s session</b>, '
+                'measured in each signal\'s own direction — a short counts a decline as a gain. For how picks have done '
+                '<b style="color:#a5b4fc;">since they fired</b>, see <b style="color:#a5b4fc;">Performance</b>. '
+                'Tap any card for the full breakdown.</div>', unsafe_allow_html=True)
+    # Sample every category before ranking, so one high-edge category can't fill the board.
+    pool = _signal_candidates(grouped)
     snaps = _discover_lock_and_load_snaps(pool)
-    top = _winning_top_signals(pool, snaps, 6)
+    top = _top_movers_today(pool, 6, per_cat=2)
+    if not top:                      # flat/closed tape — nothing is up in its own direction
+        top = _top_signals(grouped, 6)
     _render_conviction_grid(top, "ts", snaps)
 
     # ── Browse by signal (6 themed groups) ──
